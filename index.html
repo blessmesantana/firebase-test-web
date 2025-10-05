@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Scanner</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script type="module" src="main.js"></script>
+    <script type="module" src="firebase.js"></script>
+    <style>
+        #cameraSelect {
+            display: none;
+            position: absolute;
+            left: 0;
+            top: 48px;
+            min-width: 140px;
+            background: #3f51b5;
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            padding: 10px 16px;
+            z-index: 1001;
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+        }
+        #cameraSelect option {
+            background: #3949ab;
+            color: #fff;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 15px;
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="cameraSelectorContainer" style="position:absolute;top:16px;left:16px;z-index:1000;display:flex;align-items:center;gap:8px;">
+        <button id="cameraIconButton" style="background:none;border:none;padding:0;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+                <rect x="3" y="7" width="18" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.5"/>
+                <circle cx="12" cy="13" r="3.5" fill="none" stroke="#fff" stroke-width="1.5"/>
+                <rect x="8" y="4" width="8" height="3" rx="1.5" fill="none" stroke="#fff" stroke-width="1.5"/>
+            </svg>
+        </button>
+        <select id="cameraSelect" style="
+            display:none;
+            position:absolute;
+            left:0;
+            top:48px;
+            min-width:120px;
+            background:#3f51b5;
+            color:#fff;
+            border:none;
+            border-radius:8px;
+            font-size:15px;
+            font-family:'Inter',sans-serif;
+            box-shadow:0 2px 8px rgba(0,0,0,0.12);
+            padding:8px 12px;
+            z-index:1001;
+            outline:none;
+            cursor:pointer;
+        "></select>
+    </div>
+    <input type="checkbox" id="sidebarToggle" hidden />
+    <label class="sidebarIconToggle" for="sidebarToggle" style="position:absolute;top:16px;right:16px;height:44px;display:flex;align-items:center;cursor:pointer;z-index:1000;">
+        <div class="diagonal part-1"></div>
+        <div class="horizontal"></div>
+        <div class="diagonal part-2"></div>
+    </label>
+    <nav id="sidebarMenu">
+      <form id="sidebarDataForm" style="width:100%;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+        <input type="text" id="sidebarDataInput" placeholder="Введите данные" style="width:100%;padding:8px 10px;border: radius 30px;border:none;font-size:13px;font-family:'Inter',sans-serif;outline:none;box-sizing:border-box;">
+        <button type="submit" style="width:100%;background:#ea1e63;color:white;border:none;padding:8px 0;border-radius:30px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Сохранить</button>
+      </form>
+      <button id="sidebarShowStatsButton" style="width:100%;margin-top:12px;background:none;border:none;color:white;padding:10px 0;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;text-align:right;border-radius:6px;transition:background 0.2s;">Показать статистику</button>
+    </nav>
+    <div class="page">
+        <div class="button-group">
+            <button id="inputModeButton" class="button-group-item">ID передачи</button>
+            <div id="qr-result-overlay"></div>
+            <div id="manualInputContainer" class="button-group">
+                <input type="text" id="manualTransferId" placeholder="Введите ID">
+                <button id="manualSubmitButton" class="button-group-item">Отправить</button>
+            </div>
+        </div>
+
+        <div class="qr-container">
+            <video id="qr-video"></video>
+            <div class="qr-icon">
+            </div>
+            <div class="qr-spinner" id="qrSpinner">
+                <svg viewBox="0 0 48 48">
+                    <circle cx="24" cy="24" r="20" />
+                </svg>
+            </div>
+            <svg class="qr-icon" width="80px" height="80px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M7 12H12V17M3.01 12H3M8.01 17H8M12.01 21H12M21.01 12H21M3 17H4.5M15.5 12H17.5M3 21H8M12 2V8M17.6 21H19.4C19.9601 21 20.2401 21 20.454 20.891C20.6422 20.7951 20.7951 20.6422 20.891 20.454C21 20.2401 21 19.9601 21 19.4V17.6C21 17.0399 21 16.7599 20.891 16.546C20.7951 16.3578 20.6422 16.2049 20.454 16.109C20.2401 16 19.9601 16 19.4 16H17.6C17.0399 16 16.7599 16 16.546 16.109C16.3578 16.2049 16.2049 16.3578 16.109 16.546C16 16.7599 16 17.0399 16 17.6V19.4C16 19.9601 16 20.2401 16.109 20.454C16.2049 20.6422 16.3578 20.7951 16.546 20.891C16.7599 21 17.0399 21 17.6 21ZM17.6 8H19.4C19.9601 8 20.2401 8 20.454 7.89101C20.6422 7.79513 20.7951 7.64215 20.891 7.45399C21 7.24008 21 6.96005 21 6.4V4.6C21 4.03995 21 3.75992 20.891 3.54601C20.7951 3.35785 20.6422 3.20487 20.454 3.10899C20.2401 3 19.9601 3 19.4 3H17.6C17.0399 3 16.7599 3 16.546 3.10899C16.3578 3.20487 16.2049 3.35785 16.109 3.54601C16 3.75992 16 4.03995 16 4.6V6.4C16 6.96005 16 7.24008 16.109 7.45399C16.2049 7.64215 16.3578 7.79513 16.546 7.89101C16.7599 8 17.0399 8 17.6 8ZM4.6 8H6.4C6.96005 8 7.24008 8 7.45399 7.89101C7.64215 7.79513 7.79513 7.64215 7.89101 7.45399C8 7.24008 8 6.96005 8 6.4V4.6C8 4.03995 8 3.75992 7.89101 3.54601C7.79513 3.35785 7.64215 3.20487 7.45399 3.10899C7.24008 3 6.96005 3 6.4 3H4.6C4.03995 3 3.75992 3 3.54601 3.10899C3.35785 3.20487 3.20487 3.35785 3.10899 3.54601C3 3.75992 3 4.03995 3 4.6V6.4C3 6.96005 3 7.24008 3.10899 7.45399C3.20487 7.64215 3.35785 7.79513 3.54601 7.89101C3.75992 8 4.03995 8 4.6 8Z" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
+
+        <div id="result" class="scan-result">
+            <div id="resultTransferId" class="transfer-id"></div>
+            <div id="resultCourier" class="courier-name"></div>
+            <div id="resultPrevious" class="previous-courier"></div>
+            <div id="resultStatus" class="status"></div>
+            <div id="resultRawData" class="raw-data"></div>
+        </div>
+
+        <button id="scanButton" class="scan-button">Сканировать QR код</button>
+        <div class="info-text">Сканируйте QR передачи или введите ID вручную</div>
+
+        <!-- Раздел удаления данных -->
+    <!-- Кнопка удаления курьера теперь в модальном окне архива -->
+    </div>
+</body>
+</html>
