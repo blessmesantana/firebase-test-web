@@ -1148,37 +1148,10 @@ deleteCouriersButton.onclick = function() {
             if (qrSpinner) qrSpinner.classList.add('active');
             hideAllQrIcons();
             let cameraIdToUse = cameraIdOverride || selectedCameraId;
+            // Для iOS всегда environment, не переключаем на фронтальную
             if (isIOS()) {
-                // Для iPhone всегда environment
-                cameraIdToUse = null;
-            }
-            if (!cameraIdToUse) {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(device => device.kind === 'videoinput');
-                let camera = cameras.find(c => c.label && /camera2 2,? facing back/i.test(c.label));
-                if (!camera) camera = cameras.find(c => c.label && /back/i.test(c.label));
-                if (!camera) camera = cameras.find(c => c.label && /wide/i.test(c.label));
-                if (!camera) camera = cameras[0] || null;
-                // Для iOS — только environment
-                if (isIOS() && cameras.length) {
-                    camera = cameras.find(c => c.label && /back|environment/i.test(c.label)) || cameras[0];
-                }
-                cameraIdToUse = camera ? camera.deviceId : null;
-            }
-            if (!cameraIdToUse && isIOS()) {
-                // Просто environment, deviceId не нужен
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 480, max: 480 },
-                        height: { ideal: 480, max: 480 },
-                        aspectRatio: 1
-                    }
-                });
-            } else if (cameraIdToUse) {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        deviceId: { exact: cameraIdToUse },
                         facingMode: { ideal: "environment" },
                         width: { ideal: 480, max: 480 },
                         height: { ideal: 480, max: 480 },
@@ -1186,10 +1159,31 @@ deleteCouriersButton.onclick = function() {
                     }
                 });
             } else {
-                showMessage('error', 'Камеры не найдены на устройстве', '', '', '');
-                showAllQrIcons();
-                if (qrSpinner) qrSpinner.classList.remove('active');
-                return;
+                if (!cameraIdToUse) {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const cameras = devices.filter(device => device.kind === 'videoinput');
+                    let camera = cameras.find(c => c.label && /camera2 2,? facing back/i.test(c.label));
+                    if (!camera) camera = cameras.find(c => c.label && /back/i.test(c.label));
+                    if (!camera) camera = cameras.find(c => c.label && /wide/i.test(c.label));
+                    if (!camera) camera = cameras[0] || null;
+                    cameraIdToUse = camera ? camera.deviceId : null;
+                }
+                if (cameraIdToUse) {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            deviceId: { exact: cameraIdToUse },
+                            facingMode: { ideal: "environment" },
+                            width: { ideal: 480, max: 480 },
+                            height: { ideal: 480, max: 480 },
+                            aspectRatio: 1
+                        }
+                    });
+                } else {
+                    showMessage('error', 'Камеры не найдены на устройстве', '', '', '');
+                    showAllQrIcons();Ы
+                    if (qrSpinner) qrSpinner.classList.remove('active');
+                    return;
+                }
             }
             if (!videoElement) throw new Error('videoElement не найден');
             videoElement.srcObject = stream;
@@ -1234,7 +1228,12 @@ deleteCouriersButton.onclick = function() {
         processTransferId(decodedText).finally(() => {
             // После завершения обработки — снова открыть камеру через 1 секунду
             setTimeout(() => {
-                startQrScanner();
+                // Для iOS всегда environment
+                if (isIOS()) {
+                    startQrScanner(null);
+                } else {
+                    startQrScanner(selectedCameraId);
+                }
             }, 1000); // Задержка 1 секунда, чтобы пользователь успел убрать QR
         });
     }
