@@ -185,7 +185,7 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
     left: 50%;
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));
     transform: translateX(-50%);
-    width: min(520px, calc(100vw - 24px));
+    width: min(520px, calc(100vw - 12px));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -227,8 +227,8 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 10px 8px 8px;
+    gap: 3px;
+    padding: 10px 4px 8px;
     border: none;
     border-radius: 50px;
     background: transparent;
@@ -264,6 +264,9 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
 }
 
 .bottom-nav-label {
+    display: block;
+    max-width: 100%;
+    margin: 0 auto;
     font-size: 10px;
     line-height: 1.1;
     font-weight: 500;
@@ -1434,6 +1437,16 @@ input[type="checkbox"]:checked ~ #sidebarMenu {
 }
 
 @media (max-width: 480px) {
+    .bottom-nav {
+        width: calc(100vw - 8px);
+        --nav-side-padding: 6px;
+        --nav-gap: 4px;
+    }
+
+    .bottom-nav-button {
+        padding: 10px 2px 8px;
+    }
+
     #qr-result-overlay .qr-overlay-box {
         font-size: 13px !important;
     }
@@ -1885,11 +1898,51 @@ input[type="date"]:focus {
 
 .settings-panel-button-label {
     display: block;
+    min-width: 0;
     text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .settings-panel-button-icon svg {
     display: block;
+}
+
+.settings-panel-button-chevron {
+    transition:
+        transform var(--ui-duration-base) var(--ui-ease-standard),
+        opacity var(--ui-duration-fast) var(--ui-ease-soft);
+}
+
+.settings-panel-button.is-open .settings-panel-button-chevron {
+    transform: rotate(180deg);
+}
+
+.camera-picker-inline {
+    display: grid;
+    grid-template-rows: 0fr;
+    overflow: hidden;
+    transition: grid-template-rows var(--ui-duration-base) var(--ui-ease-standard);
+}
+
+.camera-picker-inline.is-open {
+    grid-template-rows: 1fr;
+}
+
+.camera-picker-inline > * {
+    min-height: 0;
+}
+
+.camera-picker-inline-content {
+    overflow: hidden;
+}
+
+.camera-picker-inline-description {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: var(--color-text-secondary);
+    font: 500 12px 'Inter', sans-serif;
+    text-align: center;
 }
 
 .camera-picker-modal-content {

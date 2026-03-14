@@ -973,6 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
         themeSelector.appendChild(themeRadioGroup);
 
         themeButton.addEventListener('click', () => {
+            setCameraSelectorOpen(false);
             themeSelector.classList.toggle('is-open');
         });
 
@@ -991,14 +992,122 @@ document.addEventListener('DOMContentLoaded', () => {
             `,
             'Выбор камеры'
         );
+        cameraButton.setAttribute('aria-expanded', 'false');
+
+        const cameraChevron = cameraButton.querySelector('.settings-panel-button-spacer');
+        if (cameraChevron) {
+            cameraChevron.classList.add('settings-panel-button-chevron');
+            cameraChevron.innerHTML = `
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+        }
+
+        const cameraSelector = document.createElement('div');
+        cameraSelector.className = 'camera-picker-inline';
+        const cameraSelectorContent = document.createElement('div');
+        cameraSelectorContent.className = 'camera-picker-inline-content';
+
+        const cameraSelectorDescription = document.createElement('div');
+        cameraSelectorDescription.className = 'camera-picker-inline-description';
+        cameraSelectorDescription.textContent = 'Выберите камеру для сканирования';
+
+        const cameraSelectorList = document.createElement('div');
+        cameraSelectorList.className = 'camera-picker-list';
+
+        cameraSelectorContent.appendChild(cameraSelectorDescription);
+        cameraSelectorContent.appendChild(cameraSelectorList);
+        cameraSelector.appendChild(cameraSelectorContent);
+
+        function setCameraSelectorOpen(isOpen) {
+            cameraSelector.classList.toggle('is-open', isOpen);
+            cameraButton.classList.toggle('is-open', isOpen);
+            cameraButton.setAttribute('aria-expanded', String(isOpen));
+        }
+
+        async function renderCameraSelector() {
+            const cameras = await camera.updateCameraList();
+
+            cameraSelectorList.innerHTML = '';
+
+            if (!Array.isArray(cameras) || cameras.length === 0) {
+                cameraSelectorDescription.textContent = 'Камеры не найдены';
+                return false;
+            }
+
+            cameraSelectorDescription.textContent = 'Выберите камеру для сканирования';
+
+            const typeCounters = {};
+
+            cameras.forEach((cameraItem, index) => {
+                const option = document.createElement('button');
+                const presentation = getCameraPresentation(
+                    cameraItem,
+                    index,
+                    typeCounters,
+                );
+
+                option.type = 'button';
+                option.className = 'camera-picker-option';
+                option.classList.toggle(
+                    'is-selected',
+                    cameraItem.deviceId === state.selectedCameraId,
+                );
+
+                const textWrap = document.createElement('span');
+                textWrap.className = 'camera-picker-option-text';
+
+                const titleText = document.createElement('span');
+                titleText.className = 'camera-picker-option-title';
+                titleText.textContent = presentation.title;
+
+                const metaText = document.createElement('span');
+                metaText.className = 'camera-picker-option-meta';
+                metaText.textContent = presentation.meta;
+
+                const indicator = document.createElement('span');
+                indicator.className = 'camera-picker-option-indicator';
+                indicator.setAttribute('aria-hidden', 'true');
+
+                textWrap.appendChild(titleText);
+                textWrap.appendChild(metaText);
+                option.appendChild(textWrap);
+                option.appendChild(indicator);
+
+                option.addEventListener('click', async () => {
+                    await camera.handleCameraSelection(cameraItem.deviceId, {
+                        restartIfActive:
+                            state.activeRootScreen === 'home' && state.scannerActive,
+                        source: state.activeRootScreen,
+                    });
+                    setCameraSelectorOpen(false);
+                });
+
+                cameraSelectorList.appendChild(option);
+            });
+
+            return true;
+        }
 
         cameraButton.addEventListener('click', async () => {
-            await openCameraPickerModal();
+            const willOpen = !cameraSelector.classList.contains('is-open');
+
+            themeSelector.classList.remove('is-open');
+
+            if (!willOpen) {
+                setCameraSelectorOpen(false);
+                return;
+            }
+
+            const hasCameras = await renderCameraSelector();
+            setCameraSelectorOpen(hasCameras);
         });
 
         card.appendChild(themeButton);
         card.appendChild(themeSelector);
         card.appendChild(cameraButton);
+        card.appendChild(cameraSelector);
         page.body.appendChild(card);
     }
 
