@@ -294,16 +294,63 @@ export async function openCourierPage({ service, ui, direction }) {
 
     const page = ui.showAppPage({
         direction,
+        onClose: () => {
+            unsubscribeCouriers?.();
+        },
         pageId: 'courierPage',
         title: 'Курьеры',
     });
+    let unsubscribeCouriers = null;
 
     appendEmptyState(page.body, 'Загрузка...');
 
-    let couriers = [];
+    function renderCourierList(couriers) {
+        if (!isPageHandleActive(page)) {
+            return;
+        }
+
+        page.body.innerHTML = '';
+
+        if (couriers.length === 0) {
+            appendEmptyState(page.body, 'Курьеры не найдены');
+            return;
+        }
+
+        const list = document.createElement('div');
+        list.className = 'app-page-list';
+
+        couriers.forEach((courierName) => {
+            list.appendChild(createCourierAccordionItem({
+                courierName,
+                page,
+                service,
+            }));
+        });
+
+        page.body.appendChild(list);
+    }
+
+    if (typeof service.subscribeCouriers === 'function') {
+        unsubscribeCouriers = service.subscribeCouriers(
+            (couriers) => {
+                renderCourierList(uniqueSortedCourierNames(couriers));
+            },
+            (error) => {
+                console.error('Ошибка загрузки курьеров:', error);
+
+                if (!isPageHandleActive(page)) {
+                    return;
+                }
+
+                page.body.innerHTML = '';
+                appendEmptyState(page.body, 'Не удалось загрузить курьеров');
+            },
+        );
+        return;
+    }
 
     try {
-        couriers = await getCourierNames(service);
+        renderCourierList(await getCourierNames(service));
     } catch (error) {
         console.error('Ошибка загрузки курьеров:', error);
 
@@ -313,32 +360,7 @@ export async function openCourierPage({ service, ui, direction }) {
 
         page.body.innerHTML = '';
         appendEmptyState(page.body, 'Не удалось загрузить курьеров');
-        return;
     }
-
-    if (!isPageHandleActive(page)) {
-        return;
-    }
-
-    page.body.innerHTML = '';
-
-    if (couriers.length === 0) {
-        appendEmptyState(page.body, 'Курьеры не найдены');
-        return;
-    }
-
-    const list = document.createElement('div');
-    list.className = 'app-page-list';
-
-    couriers.forEach((courierName) => {
-        list.appendChild(createCourierAccordionItem({
-            courierName,
-            page,
-            service,
-        }));
-    });
-
-    page.body.appendChild(list);
 }
 
 function createArchiveCourierPicker() {
@@ -366,6 +388,11 @@ function createArchiveCourierPicker() {
             selectedCourier = '';
             appendEmptyState(list, emptyText);
             return;
+        }
+
+        const availableValues = new Set(items.map((item) => item.value));
+        if (!availableValues.has(selectedCourier)) {
+            selectedCourier = '';
         }
 
         items.forEach(({ label, value }) => {
@@ -427,18 +454,7 @@ async function appendArchiveControls({ container, service, ui }) {
     container.appendChild(courierPicker.root);
     container.appendChild(actions);
 
-    const reloadCourierOptions = async () => {
-        let courierNames = [];
-
-        try {
-            courierNames = await getCourierNames(service);
-        } catch (error) {
-            console.error('Ошибка загрузки курьеров:', error);
-            ui.showScanResult('error', 'Не удалось загрузить курьеров');
-            courierPicker.setItems([]);
-            return false;
-        }
-
+    function renderCourierOptions(courierNames) {
         courierPicker.setItems([
             ...courierNames.map((courierName) => ({
                 label: courierName,
@@ -449,11 +465,34 @@ async function appendArchiveControls({ container, service, ui }) {
                 value: '__all__',
             },
         ]);
-        courierPicker.clearSelection();
-        return true;
-    };
+    }
 
-    await reloadCourierOptions();
+    let unsubscribeCouriers = null;
+
+    if (typeof service.subscribeCouriers === 'function') {
+        unsubscribeCouriers = service.subscribeCouriers(
+            (couriers) => {
+                if (!container.isConnected) {
+                    return;
+                }
+
+                renderCourierOptions(uniqueSortedCourierNames(couriers));
+            },
+            (error) => {
+                console.error('Ошибка загрузки курьеров:', error);
+                ui.showScanResult('error', 'Не удалось загрузить курьеров');
+                courierPicker.setItems([]);
+            },
+        );
+    } else {
+        try {
+            renderCourierOptions(await getCourierNames(service));
+        } catch (error) {
+            console.error('Ошибка загрузки курьеров:', error);
+            ui.showScanResult('error', 'Не удалось загрузить курьеров');
+            courierPicker.setItems([]);
+        }
+    }
 
     deleteCourierButton.addEventListener('click', async () => {
         const selectedCourier = courierPicker.getValue();
@@ -476,9 +515,8 @@ async function appendArchiveControls({ container, service, ui }) {
                 await service.deleteAllDailyData();
 
                 confirmDialog.confirmButton.textContent = 'Готово!';
-                window.setTimeout(async () => {
+                window.setTimeout(() => {
                     confirmDialog.close();
-                    await reloadCourierOptions();
                     ui.showToast('Все данные удалены!');
                 }, 1200);
             });
@@ -498,9 +536,8 @@ async function appendArchiveControls({ container, service, ui }) {
             await service.deleteCourierCascade(selectedCourier);
 
             confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(async () => {
+            window.setTimeout(() => {
                 confirmDialog.close();
-                await reloadCourierOptions();
                 ui.showToast(`Курьер "${selectedCourier}" удален!`);
             }, 1200);
         });
@@ -545,22 +582,29 @@ async function appendArchiveControls({ container, service, ui }) {
         await service.deleteAllDeliveriesAndScans();
         ui.showToast('Все передачи удалены!');
     });
-
+    
+    return () => {
+        unsubscribeCouriers?.();
+    };
 }
 
 export async function openArchivePage({ service, ui, direction }) {
     const page = ui.showAppPage({
         bodyClassName: 'archive-screen',
         direction,
+        onClose: () => {
+            cleanup?.();
+        },
         pageId: 'archivePage',
         title: 'Удаление данных',
     });
+    let cleanup = null;
 
     const layout = document.createElement('div');
     layout.className = 'archive-page-layout';
     page.body.appendChild(layout);
 
-    await appendArchiveControls({
+    cleanup = await appendArchiveControls({
         container: layout,
         service,
         ui,
@@ -600,9 +644,13 @@ export function initializeSidebarAdmin({ dom, service, ui }) {
     });
 
     archiveButton.addEventListener('click', async () => {
+        let cleanup = null;
         const archiveModal = ui.createModal({
             className: 'archive-modal-content',
             maxButtonWidth: 420,
+            onClose: () => {
+                cleanup?.();
+            },
         });
 
         const title = document.createElement('div');
@@ -615,7 +663,7 @@ export function initializeSidebarAdmin({ dom, service, ui }) {
         });
         archiveModal.content.appendChild(title);
 
-        await appendArchiveControls({
+        cleanup = await appendArchiveControls({
             container: archiveModal.content,
             service,
             ui,

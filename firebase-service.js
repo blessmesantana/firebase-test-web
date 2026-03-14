@@ -1,6 +1,7 @@
 import { database } from './firebase.js';
 import {
     get,
+    onValue,
     push,
     query,
     ref,
@@ -9,6 +10,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
 
 const collectionCache = new Map();
+const collectionVersions = new Map();
 
 function snapshotToArray(snapshot) {
     const items = [];
@@ -37,6 +39,10 @@ function uniquePaths(paths) {
     return [...new Set(paths.filter(Boolean))];
 }
 
+function getCollectionVersion(path) {
+    return collectionVersions.get(path) || 0;
+}
+
 function prefetchCollections(paths) {
     uniquePaths(paths).forEach((path) => {
         void getCollection(path).catch(() => {
@@ -49,6 +55,7 @@ function invalidateCollections(paths, options = {}) {
     const normalizedPaths = uniquePaths(paths);
 
     normalizedPaths.forEach((path) => {
+        collectionVersions.set(path, getCollectionVersion(path) + 1);
         collectionCache.delete(path);
     });
 
@@ -59,25 +66,29 @@ function invalidateCollections(paths, options = {}) {
 
 async function getCollection(path) {
     const cachedEntry = collectionCache.get(path);
+    const currentVersion = getCollectionVersion(path);
 
-    if (cachedEntry?.data) {
+    if (cachedEntry?.data && cachedEntry.version === currentVersion) {
         return cloneCollection(cachedEntry.data);
     }
 
-    if (cachedEntry?.promise) {
+    if (cachedEntry?.promise && cachedEntry.version === currentVersion) {
         return cloneCollection(await cachedEntry.promise);
     }
 
+    const requestVersion = currentVersion;
     const loadPromise = (async () => {
         const snapshot = await get(query(ref(database, path)));
         const items = snapshotToArray(snapshot);
 
-        collectionCache.set(path, { data: items });
+        if (getCollectionVersion(path) === requestVersion) {
+            collectionCache.set(path, { data: items, version: requestVersion });
+        }
 
         return items;
     })();
 
-    collectionCache.set(path, { promise: loadPromise });
+    collectionCache.set(path, { promise: loadPromise, version: requestVersion });
 
     try {
         return cloneCollection(await loadPromise);
@@ -111,6 +122,37 @@ export async function getDeliveries() {
 
 export async function getScans() {
     return getCollection('scans');
+}
+
+function subscribeCollection(path, onData, onError = null) {
+    const collectionRef = ref(database, path);
+
+    return onValue(
+        collectionRef,
+        (snapshot) => {
+            const items = snapshotToArray(snapshot);
+            const nextVersion = getCollectionVersion(path) + 1;
+
+            collectionVersions.set(path, nextVersion);
+            collectionCache.set(path, {
+                data: items,
+                version: nextVersion,
+            });
+
+            onData(cloneCollection(items));
+        },
+        (error) => {
+            if (typeof onError === 'function') {
+                onError(error);
+            } else {
+                console.error(`Subscription error for "${path}":`, error);
+            }
+        },
+    );
+}
+
+export function subscribeCouriers(onData, onError = null) {
+    return subscribeCollection('couriers', onData, onError);
 }
 
 export async function warmAdminData() {

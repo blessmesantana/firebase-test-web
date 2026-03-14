@@ -435,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function saveRawData(rawData) {
         if (!rawData) {
-            ui.showScanResult('error', 'Р’РІРµРґРёС‚Рµ РґР°РЅРЅС‹Рµ', '', '', '');
+            ui.showScanResult('error', 'Введите данные', '', '', '');
             return false;
         }
 
@@ -445,17 +445,17 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             ({ courierName, deliveryIds } = parseRawData(rawData));
         } catch (error) {
-            ui.showScanResult('error', 'РћС€РёР±РєР° СЂР°Р·Р±РѕСЂР° РґР°РЅРЅС‹С…', '', '', '');
+            ui.showScanResult('error', 'Ошибка разбора данных', '', '', '');
             return false;
         }
 
         if (!courierName) {
-            ui.showScanResult('error', 'РќРµ РЅР°Р№РґРµРЅРѕ РёРјСЏ РєСѓСЂСЊРµСЂР°', '', '', '');
+            ui.showScanResult('error', 'Не найдено имя курьера', '', '', '');
             return false;
         }
 
         if (deliveryIds.length === 0) {
-            ui.showScanResult('error', 'РќРµ РЅР°Р№РґРµРЅС‹ РЅРѕРјРµСЂР° РїРµСЂРµРґР°С‡', '', '', '');
+            ui.showScanResult('error', 'Не найдены номера передач', '', '', '');
             return false;
         }
 
@@ -464,16 +464,16 @@ document.addEventListener('DOMContentLoaded', () => {
             ui.showScanResult(
                 'success',
                 '',
-                `Р”РѕР±Р°РІР»РµРЅ РєСѓСЂСЊРµСЂ: ${courierName}`,
+                `Добавлен курьер: ${courierName}`,
                 '',
                 '',
             );
             return true;
         } catch (error) {
-            console.error('РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РґР°РЅРЅС‹С…:', error);
+            console.error('Ошибка сохранения данных:', error);
             ui.showScanResult(
                 'error',
-                'РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё',
+                'Ошибка при сохранении',
                 '',
                 '',
                 '',
