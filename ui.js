@@ -749,7 +749,7 @@ export function createUiController({ dom }) {
             marginBottom: '10px',
             className: 'archive-confirm-btn',
         });
-        const cancelButton = createSecondaryButton(options.cancelText || 'РћС‚РјРµРЅР°', {
+        const cancelButton = createSecondaryButton(options.cancelText || 'Отмена', {
             className: 'archive-cancel-btn',
         });
 
