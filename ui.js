@@ -127,9 +127,7 @@ export function createUiController({ dom }) {
         let colorClass = '';
 
         if (status === 'already_scanned') {
-            text = previousCourier
-                ? `${courier || ''}\n${previousCourier}`
-                : courier || '';
+            text = courier || '';
             colorClass = 'already_scanned';
         } else if (status === 'success') {
             text = courier || '';

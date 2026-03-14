@@ -523,6 +523,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const submitButton = ui.createPrimaryButton('Сохранить', {
             className: 'data-entry-submit-button',
         });
+        submitButton.style.width = 'calc(100% - 24px)';
+        submitButton.style.maxWidth = 'calc(100% - 24px)';
+        submitButton.style.marginLeft = 'auto';
+        submitButton.style.marginRight = 'auto';
 
         submitButton.addEventListener('click', async () => {
             submitButton.disabled = true;
