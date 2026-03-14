@@ -148,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyTheme(themeName) {
         const resolvedTheme = THEMES.includes(themeName) ? themeName : 'blue';
+        document.documentElement.dataset.theme = resolvedTheme;
         document.body.dataset.theme = resolvedTheme;
         localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
         syncBrowserThemeColor(resolvedTheme);

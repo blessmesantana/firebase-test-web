@@ -577,7 +577,6 @@ async function appendArchiveControls({ container, service, ui }) {
         }
 
         await service.deleteAllDeliveriesAndScans();
-        ui.showToast('Все передачи удалены!');
     });
     
     return () => {

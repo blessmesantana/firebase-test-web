@@ -1,4 +1,4 @@
-function applyStyles(element, styles) {
+﻿function applyStyles(element, styles) {
     Object.assign(element.style, styles);
 }
 
@@ -6,6 +6,7 @@ export function createUiController({ dom }) {
     const APP_PAGE_TRANSITION_MS = 320;
     let cameraNoticeElement = null;
     let scanPauseOverlay = null;
+    let transferSelectOverlay = null;
     let qrViewportState = 'idle';
     let appPageHost = null;
     let activeAppPage = null;
@@ -134,8 +135,8 @@ export function createUiController({ dom }) {
             colorClass = 'success';
         } else if (status === 'not_found') {
             text = message
-                ? `Передача с ID ${message} не найдена`
-                : 'Передача не найдена';
+                ? `РџРµСЂРµРґР°С‡Р° СЃ ID ${message} РЅРµ РЅР°Р№РґРµРЅР°`
+                : 'РџРµСЂРµРґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°';
             colorClass = 'error';
         } else if (status === 'error') {
             text = message;
@@ -252,6 +253,11 @@ export function createUiController({ dom }) {
     }
 
     function showCameraNotice(kind, text, options = {}) {
+        if (kind === 'error') {
+            showScanResult('error', text, '', '', '');
+            return;
+        }
+
         const duration = options.duration || (kind === 'error' ? 3600 : 2200);
         const background = kind === 'error'
             ? 'var(--color-danger)'
@@ -743,7 +749,7 @@ export function createUiController({ dom }) {
             marginBottom: '10px',
             className: 'archive-confirm-btn',
         });
-        const cancelButton = createSecondaryButton(options.cancelText || 'Отмена', {
+        const cancelButton = createSecondaryButton(options.cancelText || 'РћС‚РјРµРЅР°', {
             className: 'archive-cancel-btn',
         });
 
@@ -782,11 +788,23 @@ export function createUiController({ dom }) {
         modal.content.appendChild(title);
 
         options.items.forEach((item) => {
-            const button = createPrimaryButton(options.getLabel(item), {
+            const button = createPrimaryButton(
+                options.renderItem ? '' : options.getLabel(item),
+                {
                 padding: '10px 0',
                 marginTop: '8px',
                 marginBottom: '0',
-            });
+                },
+            );
+
+            if (options.itemClassName) {
+                button.classList.add(options.itemClassName);
+            }
+
+            if (options.renderItem) {
+                button.textContent = '';
+                options.renderItem(item, button);
+            }
 
             button.addEventListener('click', () => {
                 modal.close();
@@ -799,25 +817,167 @@ export function createUiController({ dom }) {
         return modal;
     }
 
-    function showTransferSelectModal(deliveries, onSelect) {
-        return showSelectionModal({
-            modalId: 'transferSelectModal',
-            title: 'Выберите передачу',
-            zIndex: '10001',
-            borderRadius: '24px',
-            padding: '28px 20px',
-            maxButtonWidth: 420,
-            items: deliveries,
-            getLabel: (delivery) => {
-                const date = delivery.timestamp
-                    ? `, ${new Date(delivery.timestamp).toLocaleDateString('ru-RU')}`
-                    : '';
-                return `${delivery.id} (${delivery.courier_name || 'Без курьера'})${date}`;
-            },
-            onSelect,
-        });
+    function getDifferingCharacterIndexes(deliveries) {
+        const ids = deliveries
+            .map((delivery) => String(delivery?.id || ''))
+            .filter(Boolean);
+
+        if (ids.length <= 1) {
+            return new Set();
+        }
+
+        const maxLength = Math.max(...ids.map((id) => id.length));
+        const differingIndexes = new Set();
+
+        for (let index = 0; index < maxLength; index += 1) {
+            const chars = new Set(ids.map((id) => id[index] || ''));
+            if (chars.size > 1) {
+                differingIndexes.add(index);
+            }
+        }
+
+        return differingIndexes;
     }
 
+    function closeTransferSelectOverlay() {
+        if (!transferSelectOverlay) {
+            return;
+        }
+
+        transferSelectOverlay.remove();
+        transferSelectOverlay = null;
+    }
+
+    function showTransferSelectModal(deliveries, onSelect) {
+        const differingIndexes = getDifferingCharacterIndexes(deliveries);
+
+        if (!dom.qrContainer) {
+            return showSelectionModal({
+                modalId: 'transferSelectModal',
+                title: 'Выберите передачу',
+                zIndex: '10001',
+                borderRadius: '24px',
+                padding: '28px 20px',
+                maxButtonWidth: 420,
+                itemClassName: 'transfer-select-option',
+                items: deliveries,
+                getLabel: (delivery) =>
+                    `${delivery.id} (${delivery.courier_name || 'Без курьера'})`,
+                renderItem: (delivery, button) => {
+                    const content = document.createElement('span');
+                    content.className = 'transfer-select-option-content';
+
+                    const idRow = document.createElement('span');
+                    idRow.className = 'transfer-select-option-id';
+
+                    String(delivery.id || '')
+                        .split('')
+                        .forEach((char, index) => {
+                            const charNode = document.createElement('span');
+                            charNode.className = 'transfer-select-option-id-char';
+                            if (differingIndexes.has(index)) {
+                                charNode.classList.add('is-diff');
+                            }
+                            charNode.textContent = char;
+                            idRow.appendChild(charNode);
+                        });
+
+                    const courierRow = document.createElement('span');
+                    courierRow.className = 'transfer-select-option-courier';
+                    courierRow.textContent = delivery.courier_name || 'Без курьера';
+
+                    content.appendChild(idRow);
+                    content.appendChild(courierRow);
+                    button.appendChild(content);
+                },
+                onSelect,
+            });
+        }
+
+        closeTransferSelectOverlay();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'transferSelectModal';
+        overlay.className = 'transfer-select-overlay';
+
+        const box = document.createElement('div');
+        box.className = 'transfer-select-box';
+
+        const title = document.createElement('div');
+        title.className = 'transfer-select-title';
+        title.textContent = 'Выберите передачу';
+
+        const list = document.createElement('div');
+        list.className = 'transfer-select-list';
+
+        deliveries.forEach((delivery) => {
+            const button = createPrimaryButton('', {
+                padding: '10px 0',
+                marginTop: '0',
+                marginBottom: '0',
+            });
+            button.classList.add('transfer-select-option');
+            button.textContent = '';
+
+            const content = document.createElement('span');
+            content.className = 'transfer-select-option-content';
+
+            const idRow = document.createElement('span');
+            idRow.className = 'transfer-select-option-id';
+
+            String(delivery.id || '')
+                .split('')
+                .forEach((char, index) => {
+                    const charNode = document.createElement('span');
+                    charNode.className = 'transfer-select-option-id-char';
+                    if (differingIndexes.has(index)) {
+                        charNode.classList.add('is-diff');
+                    }
+                    charNode.textContent = char;
+                    idRow.appendChild(charNode);
+                });
+
+            const courierRow = document.createElement('span');
+            courierRow.className = 'transfer-select-option-courier';
+            courierRow.textContent = delivery.courier_name || 'Без курьера';
+
+            content.appendChild(idRow);
+            content.appendChild(courierRow);
+            button.appendChild(content);
+
+            button.addEventListener('click', () => {
+                closeTransferSelectOverlay();
+                onSelect(delivery);
+            });
+
+            list.appendChild(button);
+        });
+
+        const close = () => {
+            if (overlay._isClosed) {
+                return;
+            }
+
+            overlay._isClosed = true;
+            closeTransferSelectOverlay();
+        };
+
+        overlay._cleanupModal = close;
+        overlay.addEventListener('click', close);
+        box.addEventListener('click', (event) => event.stopPropagation());
+
+        box.appendChild(title);
+        box.appendChild(list);
+        overlay.appendChild(box);
+        dom.qrContainer.appendChild(overlay);
+        transferSelectOverlay = overlay;
+
+        return {
+            close,
+            content: box,
+            element: overlay,
+        };
+    }
     ensureScanPauseOverlay();
     setQrViewportState('idle');
     syncOverlayStyles();
