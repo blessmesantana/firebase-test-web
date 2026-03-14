@@ -1,1498 +1,992 @@
-// main.js
+﻿import * as service from './firebase-service.js';
+import { createCameraController } from './camera.js';
+import {
+    initializeSidebarAdmin,
+    openArchivePage,
+    openCourierPage,
+} from './couriers.js';
+import { parseRawData, saveCourierAndDeliveries } from './deliveries.js';
+import { createScannerController } from './scanner.js';
+import { createUiController } from './ui.js';
 
-import { database } from './firebase.js';
-import { ref, push, set, get, child, query, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+document.addEventListener('DOMContentLoaded', () => {
+    const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
 
-document.addEventListener("DOMContentLoaded", function () {
-    // --- Камера: выбор устройства ---
-    const cameraSelect = document.getElementById('cameraSelect');
-    const cameraIconButton = document.getElementById('cameraIconButton');
-    let availableCameras = [];
-    let selectedCameraId = null;
+    function debugCamera(event, payload = {}) {
+        if (!DEBUG_CAMERA) {
+            return;
+        }
 
-    async function updateCameraList() {
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            availableCameras = devices.filter(device => device.kind === 'videoinput');
-            cameraSelect.innerHTML = '';
-            availableCameras.forEach((cam, idx) => {
-                const option = document.createElement('option');
-                option.value = cam.deviceId;
-                option.textContent = cam.label || `Камера ${idx+1}`;
-                cameraSelect.appendChild(option);
-            });
-            if (availableCameras.length > 0) {
-                cameraSelect.style.display = 'inline-block';
-            } else {
-                cameraSelect.style.display = 'none';
-            }
-        } catch (e) {
-            cameraSelect.style.display = 'none';
+        console.log(`[camera-debug][main] ${event}`, payload);
+    }
+
+    const dom = {
+        bottomArchiveButton: document.getElementById('bottomArchiveButton'),
+        bottomCouriersButton: document.getElementById('bottomCouriersButton'),
+        bottomDataButton: document.getElementById('bottomDataButton'),
+        bottomHomeButton: document.getElementById('bottomHomeButton'),
+        bottomSettingsButton: document.getElementById('bottomSettingsButton'),
+        bottomNav: document.querySelector('.bottom-nav'),
+        cameraSelectorContainer: document.getElementById('cameraSelectorContainer'),
+        cameraSelect: document.getElementById('cameraSelect'),
+        inputModeButton: document.getElementById('inputModeButton'),
+        loadingIndicator: document.getElementById('loadingIndicator'),
+        manualInputContainer: document.getElementById('manualInputContainer'),
+        manualSubmitButton: document.getElementById('manualSubmitButton'),
+        manualTransferIdInput: document.getElementById('manualTransferId'),
+        qrContainer: document.querySelector('.qr-container'),
+        qrIcons: Array.from(document.querySelectorAll('.qr-icon')),
+        qrResultOverlay: document.getElementById('qr-result-overlay'),
+        qrSpinner: document.getElementById('qrSpinner'),
+        resultCourier: document.getElementById('resultCourier'),
+        resultDiv: document.getElementById('result'),
+        resultPrevious: document.getElementById('resultPrevious'),
+        resultRawData: document.getElementById('resultRawData'),
+        resultStatus: document.getElementById('resultStatus'),
+        resultTransferId: document.getElementById('resultTransferId'),
+        scanButton: document.getElementById('scanButton'),
+        pageRoot: document.querySelector('.page'),
+        sidebarDataForm: document.getElementById('sidebarDataForm'),
+        sidebarDataInput: document.getElementById('sidebarDataInput'),
+        sidebarMenu: document.getElementById('sidebarMenu'),
+        sidebarMenuNav: document.querySelector('nav#sidebarMenu'),
+        sidebarShowStatsButton: document.getElementById('sidebarShowStatsButton'),
+        sidebarToggle: document.getElementById('sidebarToggle'),
+        sidebarToggleLabel: document.querySelector('label[for="sidebarToggle"]'),
+        videoElement: document.getElementById('qr-video'),
+    };
+
+    const state = {
+        activeRootScreen: 'home',
+        availableCameras: [],
+        autoRestartAllowed: true,
+        cameraMessages: {
+            grantedShown: false,
+            requestShown: false,
+        },
+        codeReader: null,
+        decodeRunId: 0,
+        isProcessing: false,
+        lastScanTime: 0,
+        restartTimerId: null,
+        scanPause: {
+            active: false,
+            reason: null,
+            timerId: null,
+        },
+        scanSessionId: 0,
+        scannerActive: false,
+        scannerPhase: 'idle',
+        scannerStarting: false,
+        selectedCameraId: localStorage.getItem('selectedCameraId') || null,
+        stopReason: null,
+        stream: null,
+    };
+
+    const ui = createUiController({ dom });
+    const camera = createCameraController({ state, dom, ui });
+    const scanner = createScannerController({
+        state,
+        service,
+        ui,
+        camera,
+    });
+
+    camera.setScanResultHandler(scanner.handleScanSuccess);
+
+    if (dom.sidebarShowStatsButton) {
+        dom.sidebarShowStatsButton.remove();
+    }
+
+    const adminControls = initializeSidebarAdmin({
+        dom,
+        service,
+        ui,
+    });
+
+    const THEME_STORAGE_KEY = 'appTheme';
+    const THEMES = ['blue', 'dark'];
+    let cameraMenuVisible = false;
+    let activeBottomNavKey = 'home';
+    const bottomNavOrder = ['data', 'couriers', 'home', 'archive', 'settings'];
+    const cameraSelectHomeParent = dom.cameraSelect?.parentElement || null;
+    const cameraSelectHomeNextSibling = dom.cameraSelect?.nextSibling || null;
+
+    function restoreCameraSelectToHomeHost() {
+        if (!dom.cameraSelect || !cameraSelectHomeParent) {
+            return;
+        }
+
+        if (dom.cameraSelect.parentElement === cameraSelectHomeParent) {
+            return;
+        }
+
+        if (cameraSelectHomeNextSibling?.parentNode === cameraSelectHomeParent) {
+            cameraSelectHomeParent.insertBefore(dom.cameraSelect, cameraSelectHomeNextSibling);
+            return;
+        }
+
+        cameraSelectHomeParent.appendChild(dom.cameraSelect);
+    }
+
+    function applyTheme(themeName) {
+        const resolvedTheme = THEMES.includes(themeName) ? themeName : 'blue';
+        document.body.dataset.theme = resolvedTheme;
+        localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
+        return resolvedTheme;
+    }
+
+    function getBottomNavDirection(targetKey) {
+        const currentIndex = bottomNavOrder.indexOf(activeBottomNavKey);
+        const targetIndex = bottomNavOrder.indexOf(targetKey);
+
+        if (currentIndex === -1 || targetIndex === -1 || currentIndex === targetIndex) {
+            return 'forward';
+        }
+
+        return targetIndex > currentIndex ? 'forward' : 'backward';
+    }
+
+    function setActiveBottomNav(activeKey) {
+        const entries = {
+            archive: dom.bottomArchiveButton,
+            couriers: dom.bottomCouriersButton,
+            data: dom.bottomDataButton,
+            home: dom.bottomHomeButton,
+            settings: dom.bottomSettingsButton,
+        };
+
+        Object.entries(entries).forEach(([key, button]) => {
+            button?.classList.toggle('is-active', key === activeKey);
+        });
+
+        activeBottomNavKey = activeKey;
+        state.activeRootScreen = activeKey;
+        dom.bottomNav?.style.setProperty('--nav-active-index', String(Math.max(bottomNavOrder.indexOf(activeKey), 0)));
+        dom.bottomNav?.setAttribute('data-nav-active', activeKey);
+        setHomeChromeVisible(activeKey === 'home');
+    }
+
+    function setHomeChromeVisible(isVisible) {
+        const visibility = isVisible ? '1' : '0';
+        const pointerEvents = isVisible ? '' : 'none';
+
+        if (dom.cameraSelectorContainer) {
+            dom.cameraSelectorContainer.style.opacity = visibility;
+            dom.cameraSelectorContainer.style.pointerEvents = pointerEvents;
+        }
+
+        if (dom.sidebarToggleLabel) {
+            dom.sidebarToggleLabel.style.opacity = visibility;
+            dom.sidebarToggleLabel.style.pointerEvents = pointerEvents;
+        }
+
+        if (!isVisible && dom.cameraSelect) {
+            dom.cameraSelect.style.display = 'none';
+            cameraMenuVisible = false;
+        }
+
+        if (!isVisible && dom.sidebarToggle) {
+            dom.sidebarToggle.checked = false;
         }
     }
 
-    function isIOS() {
-        return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    }
-
-    if (cameraIconButton) {
-        let cameraMenuVisible = false;
-        cameraIconButton.addEventListener('click', async () => {
-            if (!cameraMenuVisible) {
-                await updateCameraList();
-                cameraSelect.style.display = 'inline-block';
-                cameraSelect.focus();
-                cameraMenuVisible = true;
-            } else {
-                cameraSelect.style.display = 'none';
-                cameraMenuVisible = false;
-            }
-        });
-        if (cameraSelect) {
-            cameraSelect.addEventListener('change', () => {
-                selectedCameraId = cameraSelect.value;
-                localStorage.setItem('selectedCameraId', selectedCameraId);
-                cameraSelect.style.display = 'none';
-                cameraMenuVisible = false;
-                stopQrScanner();
-                startQrScanner(selectedCameraId);
-            });
+    function handleSidebarClose(event) {
+        if (!dom.sidebarMenu || !dom.sidebarToggle) {
+            return;
         }
-    }
 
-    // При загрузке страницы восстанавливаем выбор камеры
-    selectedCameraId = localStorage.getItem('selectedCameraId') || null;
+        const sidebarLabel = document.querySelector('label[for="sidebarToggle"]');
+        const isSidebarOpen = dom.sidebarToggle.checked;
 
-    const resultDiv = document.getElementById('result');
-    const resultTransferId = document.getElementById('resultTransferId');
-    const resultCourier = document.getElementById('resultCourier');
-    const resultPrevious = document.getElementById('resultPrevious');
-    const resultStatus = document.getElementById('resultStatus');
-    const resultRawData = document.getElementById('resultRawData');
-    const qrResultOverlay = document.getElementById('qr-result-overlay');
-
-    const inputModeButton = document.getElementById('inputModeButton');
-    const manualInputContainer = document.getElementById('manualInputContainer');
-    const manualTransferIdInput = document.getElementById('manualTransferId');
-    const manualSubmitButton = document.getElementById('manualSubmitButton');
-    const scanButton = document.getElementById('scanButton');
-    const qrContainer = document.querySelector('.qr-container');
-    const videoElement = document.getElementById('qr-video');
-    const qrIcons = document.querySelectorAll('.qr-icon');
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    const qrSpinner = document.getElementById('qrSpinner');
-
-    // Utility functions to show/hide all qr icons
-    function hideAllQrIcons() {
-        qrIcons.forEach(icon => icon.classList.add('hide'));
-    }
-    function showAllQrIcons() {
-        qrIcons.forEach(icon => icon.classList.remove('hide'));
-    }
-
-    if (qrIcons.length) showAllQrIcons(); // Показываем иконки при загрузке
-
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    const sidebarMenu = document.getElementById('sidebarMenu');
-    const addDataButton = document.getElementById('addDataButton');
-    const submitRawDataButton = document.getElementById('submitRawDataButton');
-    const showStatsButton = document.getElementById('showStatsButton');
-    const statsContainer = document.getElementById('statsContainer');
-    const statsList = document.getElementById('statsList');
-    const rawDataInput = document.getElementById('rawData');
-
-    const sidebarDataForm = document.getElementById('sidebarDataForm');
-    const sidebarDataInput = document.getElementById('sidebarDataInput');
-    const sidebarShowStatsButton = document.getElementById('sidebarShowStatsButton');
-    const sidebarMenuNav = document.querySelector('nav#sidebarMenu');
-    const sidebarStatsList = document.createElement('ul');
-    sidebarStatsList.style.width = '100%';
-    sidebarStatsList.style.background = '#3f51b5';
-    sidebarStatsList.style.borderRadius = '5px';
-    sidebarStatsList.style.padding = '10px';
-    sidebarStatsList.style.marginTop = '10px';
-    sidebarStatsList.style.maxHeight = '200px';
-    sidebarStatsList.style.overflowY = 'auto';
-    let sidebarStatsVisible = false;
-
-    let stream = null;
-    let codeReader = null;
-    let lastScanTime = 0;
-    const scanDelay = 2000;
-    let isProcessing = false;
-
-    // === Защита: Проверка наличия важных DOM-элементов ===
-    if (!sidebarMenu) console.warn('sidebarMenu не найден!');
-    if (!sidebarToggle) console.warn('sidebarToggle не найден!');
-    if (!addDataButton) console.warn('addDataButton не найден!');
-    if (!submitRawDataButton) console.warn('submitRawDataButton не найден!');
-    if (!showStatsButton) console.warn('showStatsButton не найден!');
-    if (!statsContainer) console.warn('statsContainer не найден!');
-    if (!statsList) console.warn('statsList не найден!');
-    if (!rawDataInput) console.warn('rawDataInput не найден!');
-    if (!sidebarDataForm) console.warn('sidebarDataForm не найден!');
-    if (!sidebarDataInput) console.warn('sidebarDataInput не найден!');
-    if (!sidebarMenuNav) console.warn('sidebarMenuNav не найден!');
-
-    // Dynamically adjust the overlay width to match the button
-    if (inputModeButton && qrResultOverlay) {
-        syncOverlayStyles(); // Синхронизируем стили при загрузке
-    }
-
-    // === ФУНКЦИЯ ДЛЯ СИНХРОНИЗАЦИИ ШИРИНЫ МОДАЛЬНЫХ ОКОН ===
-    function setModalContentWidth(modalContent) {
-        if (!inputModeButton || !modalContent) return;
-        const buttonWidth = inputModeButton.offsetWidth;
-        modalContent.style.width = buttonWidth + 'px';
-        modalContent.style.minWidth = buttonWidth + 'px';
-        modalContent.style.maxWidth = buttonWidth + 'px';
-    }
-
-    function syncOverlayStyles() {
-        if (inputModeButton && qrResultOverlay) {
-            // overlay теперь абсолютный и занимает всю .button-group, не нужно подгонять размеры
-            qrResultOverlay.style.position = 'absolute';
-            qrResultOverlay.style.top = '0';
-            qrResultOverlay.style.left = '0';
-            qrResultOverlay.style.width = '100%';
-            qrResultOverlay.style.height = '100%';
-            qrResultOverlay.style.margin = '0';
-            qrResultOverlay.style.padding = '0';
-            qrResultOverlay.style.boxSizing = 'border-box';
-            qrResultOverlay.style.borderRadius = window.getComputedStyle(inputModeButton).borderRadius;
-            // Можно убрать копирование других стилей, чтобы overlay всегда совпадал с кнопкой
-        }
-    }
-
-    // Синхронизируем стили overlay при изменении размера окна
-    window.addEventListener('resize', syncOverlayStyles);
-
-    // Синхронизируем стили overlay при изменении размеров inputModeButton
-    if (window.ResizeObserver && inputModeButton) {
-        const ro = new ResizeObserver(syncOverlayStyles);
-        ro.observe(inputModeButton);
-    }
-
-    if (scanButton) {
-        scanButton.addEventListener('click', () => {
-            scanButton.classList.add('released');
-            startQrScanner();
-            setTimeout(() => scanButton.classList.remove('released'), 500);
-        });
-    }
-
-    // Показ сообщения
-    window.showMessage = function(status, message, courier, previousCourier, rawData) {
-        if (!qrResultOverlay) return;
-        syncOverlayStyles(); // Синхронизировать стили overlay с inputModeButton
-        let text = '';
-        let colorClass = '';
-        if (status === 'already_scanned') {
-            text = courier ? courier : '';
-            colorClass = 'already_scanned';
-        } else if (status === 'success') {
-            text = courier ? courier : '';
-            colorClass = 'success';
-        } else if (status === 'not_found') {
-            text = message ? `Передача с ID ${message} не найдена` : 'Передача не найдена';
-            colorClass = 'error';
-        } else if (status === 'error') {
-            text = message;
-            colorClass = 'error';
-        } else {
-            text = message;
-            colorClass = '';
-        }
-        qrResultOverlay.innerHTML = `<div class='qr-overlay-box'>${text.trim()}</div>`;
-        qrResultOverlay.className = `show ${colorClass}`;
-        resultDiv.style.display = 'none';
-        // Таймер скрытия для всех уведомлений
-        clearTimeout(qrResultOverlay._hideTimer);
-        qrResultOverlay._hideTimer = setTimeout(() => {
-            qrResultOverlay.className = '';
-            qrResultOverlay.innerHTML = '';
-        }, 2200);
-    }
-
-    // Обработчики событий
-    if (inputModeButton) {
-        inputModeButton.addEventListener('click', () => {
-                inputModeButton.classList.add('active');
-                manualInputContainer.classList.add('active');
-                stopQrScanner();
-                showAllQrIcons();
-                if (videoElement) videoElement.style.display = 'none';
-                manualTransferIdInput.focus();
-        });
-    }
-
-    if (manualSubmitButton) {
-        manualSubmitButton.addEventListener('click', () => {
-            const transferId = manualTransferIdInput.value.trim();
-            stopQrScanner();
-            showAllQrIcons();
-            if (videoElement) videoElement.style.display = 'none';
-            if (/^\d{4}$/.test(transferId) || /^\d{10}$/.test(transferId)) {
-                processTransferId(transferId).finally(() => {
-                    stopQrScanner();
-                    showAllQrIcons();
-                    if (videoElement) videoElement.style.display = 'none';
-                });
-            } else {
-                showMessage('error', 'Неверный формат ID', '', '', '');
-            }
-        });
-    }
-
-    if (manualTransferIdInput) {
-        manualTransferIdInput.addEventListener('keypress', e => {
-            if (e.key === 'Enter') manualSubmitButton.click();
-        });
-    }
-
-    // === Сайдбар: только чекбокс+label, без JS-открытия ===
-    // Удаляем JS-обработчик sidebarToggle, работаем только с чекбоксом
-    // === Закрытие сайдбара по клику вне его ===
-    function handleSidebarClose(e) {
-        const sidebarMenu = document.getElementById('sidebarMenu');
-        const sidebarToggle = document.getElementById('sidebarToggle');
-        if (!sidebarMenu || !sidebarToggle) return;
-        // Проверяем открыт ли сайдбар (чекбокс активен)
-        const isOpen = sidebarToggle.checked;
-        // Если клик вне меню и вне label (крестика/бургера)
-        const label = document.querySelector('label[for="sidebarToggle"]');
         if (
-            isOpen &&
-            !sidebarMenu.contains(e.target) &&
-            (!label || !label.contains(e.target))
+            isSidebarOpen &&
+            !dom.sidebarMenu.contains(event.target) &&
+            (!sidebarLabel || !sidebarLabel.contains(event.target))
         ) {
-            sidebarToggle.checked = false;
+            dom.sidebarToggle.checked = false;
         }
     }
+
     document.addEventListener('mousedown', handleSidebarClose);
     document.addEventListener('touchstart', handleSidebarClose);
 
-    if (addDataButton) {
-        addDataButton.addEventListener('click', async () => {
-            if (!sidebarMenu || !rawDataInput || !submitRawDataButton || !statsContainer) return;
-            sidebarMenu.style.display = 'block';
-            rawDataInput.style.display = 'block';
-            submitRawDataButton.style.display = 'block';
-            statsContainer.style.display = 'none';
+    async function startScanFromButton() {
+        debugCamera('scan_button_click', {
+            activeRootScreen: state.activeRootScreen,
+            scannerActive: state.scannerActive,
+            scannerPhase: state.scannerPhase,
+            scannerStarting: state.scannerStarting,
+            selectedCameraId: state.selectedCameraId,
+            hasStream: Boolean(state.stream),
+        });
+        dom.scanButton?.classList.add('released');
+        ui.clearScanResult();
+        ui.hideManualInput();
+        ui.setVideoVisible(true);
+        ui.setQrViewportState('loading');
+        await camera.startQrScanner(state.selectedCameraId);
+        window.setTimeout(() => {
+            dom.scanButton?.classList.remove('released');
+        }, 500);
+    }
+
+    if (dom.scanButton) {
+        const scanSwipeState = {
+            active: false,
+            pointerId: null,
+            startX: 0,
+            startY: 0,
+            suppressClick: false,
+        };
+        const SWIPE_STOP_THRESHOLD = 92;
+        const SWIPE_MAX_OFFSET = 118;
+        const TAP_MAX_DISTANCE = 10;
+
+        function clearSuppressedClickSoon() {
+            window.setTimeout(() => {
+                scanSwipeState.suppressClick = false;
+            }, 260);
+        }
+
+        function resetScanSwipeVisual() {
+            dom.scanButton?.classList.remove('is-dragging');
+            dom.scanButton?.style.setProperty('--scan-swipe-offset', '0px');
+            dom.scanButton?.style.setProperty('--scan-swipe-progress', '0');
+            dom.scanButton?.removeAttribute('data-swipe-direction');
+        }
+
+        function updateScanSwipeVisual(offsetX) {
+            const limitedOffset = Math.max(
+                -SWIPE_MAX_OFFSET,
+                Math.min(SWIPE_MAX_OFFSET, offsetX),
+            );
+            const progress = Math.min(
+                Math.abs(limitedOffset) / SWIPE_STOP_THRESHOLD,
+                1,
+            );
+
+            dom.scanButton?.style.setProperty(
+                '--scan-swipe-offset',
+                `${limitedOffset}px`,
+            );
+            dom.scanButton?.style.setProperty(
+                '--scan-swipe-progress',
+                progress.toFixed(3),
+            );
+
+            if (limitedOffset === 0) {
+                dom.scanButton?.removeAttribute('data-swipe-direction');
+                return;
+            }
+
+            dom.scanButton?.setAttribute(
+                'data-swipe-direction',
+                limitedOffset < 0 ? 'right' : 'left',
+            );
+        }
+
+        dom.scanButton.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) {
+                return;
+            }
+
+            scanSwipeState.active = true;
+            scanSwipeState.pointerId = event.pointerId;
+            scanSwipeState.startX = event.clientX;
+            scanSwipeState.startY = event.clientY;
+            dom.scanButton.setPointerCapture(event.pointerId);
+            dom.scanButton.classList.add('is-dragging');
+        });
+
+        dom.scanButton.addEventListener('pointermove', (event) => {
+            if (
+                !scanSwipeState.active ||
+                scanSwipeState.pointerId !== event.pointerId
+            ) {
+                return;
+            }
+
+            const offsetX = event.clientX - scanSwipeState.startX;
+            const offsetY = event.clientY - scanSwipeState.startY;
+
+            if (
+                Math.abs(offsetY) > Math.abs(offsetX) &&
+                Math.abs(offsetY) > TAP_MAX_DISTANCE
+            ) {
+                return;
+            }
+
+            updateScanSwipeVisual(offsetX);
+        });
+
+        async function finishScanButtonGesture(event) {
+            if (
+                !scanSwipeState.active ||
+                scanSwipeState.pointerId !== event.pointerId
+            ) {
+                return;
+            }
+
+            const offsetX = event.clientX - scanSwipeState.startX;
+            const offsetY = event.clientY - scanSwipeState.startY;
+            const absOffsetX = Math.abs(offsetX);
+            const absOffsetY = Math.abs(offsetY);
+
+            scanSwipeState.active = false;
+            scanSwipeState.pointerId = null;
+            scanSwipeState.suppressClick = true;
+
+            if (dom.scanButton.hasPointerCapture(event.pointerId)) {
+                dom.scanButton.releasePointerCapture(event.pointerId);
+            }
+
+            if (absOffsetX >= SWIPE_STOP_THRESHOLD) {
+                handleCameraStop();
+                resetScanSwipeVisual();
+                clearSuppressedClickSoon();
+                return;
+            }
+
+            resetScanSwipeVisual();
+
+            if (absOffsetX <= TAP_MAX_DISTANCE && absOffsetY <= TAP_MAX_DISTANCE) {
+                await startScanFromButton();
+            }
+
+            clearSuppressedClickSoon();
+        }
+
+        dom.scanButton.addEventListener('pointerup', (event) => {
+            void finishScanButtonGesture(event);
+        });
+
+        dom.scanButton.addEventListener('pointercancel', (event) => {
+            if (
+                !scanSwipeState.active ||
+                scanSwipeState.pointerId !== event.pointerId
+            ) {
+                return;
+            }
+
+            scanSwipeState.active = false;
+            scanSwipeState.pointerId = null;
+            scanSwipeState.suppressClick = true;
+            resetScanSwipeVisual();
+            clearSuppressedClickSoon();
+        });
+
+        dom.scanButton.addEventListener('click', (event) => {
+            if (scanSwipeState.suppressClick || event.detail !== 0) {
+                event.preventDefault();
+                scanSwipeState.suppressClick = false;
+            }
+        });
+
+        dom.scanButton.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
+            }
+
+            event.preventDefault();
+            void startScanFromButton();
         });
     }
 
-    if (submitRawDataButton) {
-        submitRawDataButton.addEventListener('click', async () => {
-            if (!rawDataInput) return;
-            const rawData = rawDataInput.value.trim();
-            if (!rawData) {
-                showMessage('error', 'Введите данные', '', '', '');
+    if (dom.inputModeButton) {
+        dom.inputModeButton.addEventListener('click', () => {
+            ui.showManualInput();
+            camera.stopQrScanner({ manual: true, reason: 'manual_input' });
+            ui.setQrViewportState('idle');
+            ui.setVideoVisible(false);
+            ui.focusManualInput();
+        });
+    }
+
+    async function submitManualTransferId() {
+        const transferId = dom.manualTransferIdInput?.value.trim() || '';
+
+        camera.stopQrScanner({ manual: true, reason: 'manual_input_submit' });
+        ui.setQrViewportState('idle');
+        ui.setVideoVisible(false);
+
+        if (/^\d{4}$/.test(transferId) || /^\d{10}$/.test(transferId)) {
+            await scanner.processTransferId(transferId);
+            return;
+        }
+
+        ui.showScanResult('error', 'Неверный формат ID', '', '', '');
+    }
+
+    if (dom.manualSubmitButton) {
+        dom.manualSubmitButton.addEventListener('click', () => {
+            void submitManualTransferId();
+        });
+    }
+
+    if (dom.manualTransferIdInput) {
+        dom.manualTransferIdInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                void submitManualTransferId();
+            }
+        });
+    }
+
+    async function saveRawData(rawData) {
+        if (!rawData) {
+            ui.showScanResult('error', 'Р’РІРµРґРёС‚Рµ РґР°РЅРЅС‹Рµ', '', '', '');
+            return false;
+        }
+
+        let courierName = '';
+        let deliveryIds = [];
+
+        try {
+            ({ courierName, deliveryIds } = parseRawData(rawData));
+        } catch (error) {
+            ui.showScanResult('error', 'РћС€РёР±РєР° СЂР°Р·Р±РѕСЂР° РґР°РЅРЅС‹С…', '', '', '');
+            return false;
+        }
+
+        if (!courierName) {
+            ui.showScanResult('error', 'РќРµ РЅР°Р№РґРµРЅРѕ РёРјСЏ РєСѓСЂСЊРµСЂР°', '', '', '');
+            return false;
+        }
+
+        if (deliveryIds.length === 0) {
+            ui.showScanResult('error', 'РќРµ РЅР°Р№РґРµРЅС‹ РЅРѕРјРµСЂР° РїРµСЂРµРґР°С‡', '', '', '');
+            return false;
+        }
+
+        try {
+            await saveCourierAndDeliveries(service, courierName, deliveryIds);
+            ui.showScanResult(
+                'success',
+                '',
+                `Р”РѕР±Р°РІР»РµРЅ РєСѓСЂСЊРµСЂ: ${courierName}`,
+                '',
+                '',
+            );
+            return true;
+        } catch (error) {
+            console.error('РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РґР°РЅРЅС‹С…:', error);
+            ui.showScanResult(
+                'error',
+                'РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё',
+                '',
+                '',
+                '',
+            );
+            return false;
+        }
+    }
+
+    function openDataEntryModal() {
+        const modal = ui.createModal({
+            modalId: 'dataEntryModal',
+            className: 'data-entry-modal-content',
+            maxButtonWidth: 420,
+        });
+
+        const title = document.createElement('div');
+        title.textContent = 'Ввод данных';
+        title.className = 'data-entry-modal-title';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'data-entry-textarea';
+        textarea.placeholder = 'Введите нарпавление/имя курьера и список передач.';
+        textarea.value = dom.sidebarDataInput?.value || '';
+
+        const submitButton = ui.createPrimaryButton('Сохранить', {
+            className: 'data-entry-submit-button',
+        });
+
+        submitButton.addEventListener('click', async () => {
+            submitButton.disabled = true;
+            const isSaved = await saveRawData(textarea.value.trim());
+            submitButton.disabled = false;
+
+            if (isSaved) {
+                if (dom.sidebarDataInput) {
+                    dom.sidebarDataInput.value = '';
+                }
+                modal.close();
                 return;
             }
-            let courierName, deliveryIds;
+
+            textarea.focus();
+        });
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(textarea);
+        modal.content.appendChild(submitButton);
+
+        window.setTimeout(() => textarea.focus(), 40);
+    }
+
+    if (dom.sidebarDataForm && dom.sidebarDataInput) {
+        dom.sidebarDataForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const rawData = dom.sidebarDataInput.value.trim();
+
+            if (!rawData) {
+                ui.showScanResult('error', 'Введите данные', '', '', '');
+                return;
+            }
+
+            let courierName = '';
+            let deliveryIds = [];
+
             try {
                 ({ courierName, deliveryIds } = parseRawData(rawData));
-            } catch (e) {
-                showMessage('error', 'Ошибка разбора данных', '', '', '');
+            } catch (error) {
+                ui.showScanResult('error', 'Ошибка разбора данных', '', '', '');
                 return;
             }
+
             if (!courierName) {
-                showMessage('error', 'Не найдено имя курьера', '', '', '');
+                ui.showScanResult('error', 'Не найдено имя курьера', '', '', '');
                 return;
             }
-            if (!deliveryIds || deliveryIds.length === 0) {
-                showMessage('error', 'Не найдены номера передач', '', '', '');
+
+            if (deliveryIds.length === 0) {
+                ui.showScanResult('error', 'Не найдены номера передач', '', '', '');
                 return;
             }
+
             try {
-                await saveCourierAndDeliveries(courierName, deliveryIds);
-            } catch (e) {
-                showMessage('error', 'Ошибка сохранения данных', '', '', '');
-                return;
+                await saveCourierAndDeliveries(service, courierName, deliveryIds);
+                dom.sidebarDataInput.value = '';
+                ui.showScanResult(
+                    'success',
+                    '',
+                    `Добавлен курьер: ${courierName}`,
+                    '',
+                    '',
+                );
+            } catch (error) {
+                console.error('Ошибка сохранения данных:', error);
+                ui.showScanResult(
+                    'error',
+                    'Ошибка при сохранении',
+                    '',
+                    '',
+                    '',
+                );
             }
-            rawDataInput.value = '';
         });
     }
 
-    if (showStatsButton) {
-        showStatsButton.addEventListener('click', async () => {
-            if (!rawDataInput || !submitRawDataButton || !statsContainer) return;
-            rawDataInput.style.display = 'none';
-            submitRawDataButton.style.display = 'none';
-            statsContainer.style.display = 'block';
-            try {
-                await loadStats();
-            } catch (e) {
-                showMessage('error', 'Ошибка загрузки статистики', '', '', '');
-            }
-        });
-    }
-
-    if (sidebarDataForm && sidebarDataInput) {
-        sidebarDataForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const text = sidebarDataInput.value.trim();
-            if (!text) {
-                showMessage('error', 'Введите данные', '', '', '');
-                return;
-            }
-            let courierName, deliveryIds;
-            try {
-                ({ courierName, deliveryIds } = parseRawData(text));
-            } catch (e) {
-                showMessage('error', 'Ошибка разбора данных', '', '', '');
-                return;
-            }
-            if (!courierName) {
-                showMessage('error', 'Не найдено имя курьера', '', '', '');
-                return;
-            }
-            if (!deliveryIds || deliveryIds.length === 0) {
-                showMessage('error', 'Не найдены номера передач', '', '', '');
-                return;
-            }
-            try {
-                await saveCourierAndDeliveries(courierName, deliveryIds);
-            } catch (e) {
-                showMessage('error', 'Ошибка сохранения данных', '', '', '');
-                return;
-            }
-            sidebarDataInput.value = '';
-        });
-    }
-
-    if (sidebarShowStatsButton) sidebarShowStatsButton.remove();
-    if (sidebarStatsList) sidebarStatsList.remove();
-
-    // Переименовываем кнопку и переносим в неё функционал показа передач по курьеру
-    const processButton = document.createElement('button');
-    processButton.textContent = 'Курьеры';
-    processButton.id = 'processScanButton';
-    processButton.style.background = 'none';
-    processButton.style.color = '#fff';
-    processButton.style.border = 'none';
-    processButton.style.fontSize = '13px';
-    processButton.style.fontWeight = '500';
-    processButton.style.fontFamily = 'Inter, sans-serif';
-    processButton.style.textAlign = 'center';
-    processButton.style.borderRadius = '18px';
-    processButton.style.transition = 'background 0.2s';
-    processButton.style.letterSpacing = 'normal';
-    processButton.style.cursor = 'pointer';
-    processButton.style.marginTop = '1px';
-    processButton.style.padding = '12px 0 10px 0';
-    processButton.style.width = '100%';
-    sidebarMenuNav.appendChild(processButton);
-
-    // === КНОПКА АРХИВ (ВСЕГДА ВНИЗУ) ===
-    const archiveButton = document.createElement('button');
-    archiveButton.id = 'archiveButton';
-    archiveButton.style.background = 'none';
-    archiveButton.style.color = '#fff';
-    archiveButton.style.border = 'none';
-    archiveButton.style.fontSize = '15px';
-    archiveButton.style.fontWeight = '500';
-    archiveButton.style.fontFamily = 'Inter, sans-serif';
-    archiveButton.style.textAlign = 'center';
-    archiveButton.style.borderRadius = '18px';
-    archiveButton.style.transition = 'background 0.2s';
-    archiveButton.style.letterSpacing = 'normal';
-    archiveButton.style.cursor = 'pointer';
-    archiveButton.style.padding = '12px 0 10px 0';
-    archiveButton.style.width = '100%';
-    archiveButton.style.display = 'flex';
-    archiveButton.style.alignItems = 'center';
-    archiveButton.style.justifyContent = 'center';
-    archiveButton.style.marginTop = 'auto';
-    archiveButton.style.marginBottom = '8px';
-    archiveButton.innerHTML = `<span style="display:flex;align-items:center;width:20px;justify-content:flex-start;"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 6.5V16a2 2 0 002 2h12a2 2 0 002-2V6.5M2 6.5L4.5 3h11L18 6.5M2 6.5h16" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="flex:1;text-align:left;padding-left:12px;">Архив</span>`;
-    archiveButton.innerHTML = `<span style="display:flex;align-items:center;width:20px;justify-content:flex-start;"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="#fff" stroke-width="1.5"/><path d="M3 7h14" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="#fff" stroke-width="1.5"/><path d="M7 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="#fff" stroke-width="1.5"/></svg></span><span style="flex:1;text-align:left;padding-left:12px;">Удаление данных</span>`;
-    sidebarMenuNav.appendChild(archiveButton);
-
-    // === МОДАЛЬНОЕ ОКНО АРХИВА ===
-    let archiveModal = null;
-    let archiveModalContent = null;
-    archiveButton.addEventListener('click', async () => {
-        if (archiveModal) archiveModal.remove();
-        archiveModal = document.createElement('div');
-        archiveModal.style.position = 'fixed';
-        archiveModal.style.top = '0';
-        archiveModal.style.left = '0';
-        archiveModal.style.width = '100vw';
-        archiveModal.style.height = '100vh';
-        archiveModal.style.background = 'rgba(0,0,0,0.7)';
-        archiveModal.style.display = 'flex';
-        archiveModal.style.alignItems = 'center';
-        archiveModal.style.justifyContent = 'center';
-        archiveModal.style.zIndex = '9999';
-        archiveModal.addEventListener('click', () => archiveModal.remove());
-
-        const modalContent = document.createElement('div');
-        modalContent.style.background = '#3f51b5';
-        modalContent.style.borderRadius = '32px';
-        modalContent.style.padding = '32px 24px';
-        modalContent.style.color = 'white';
-        modalContent.style.textAlign = 'center';
-        modalContent.style.position = 'relative';
-        modalContent.style.fontFamily = 'Inter, sans-serif';
-        modalContent.style.fontSize = '13px';
-        modalContent.classList.add('archive-modal-content');
-        archiveModalContent = modalContent;
-        setModalContentWidth(modalContent);
-        // Не закрывать модалку при клике внутри окна
-        modalContent.addEventListener('click', e => e.stopPropagation());
-
-        // === Ширина модального окна архива ===
-        function setArchiveModalWidth() {
-            if (inputModeButton) {
-                const w = Math.min(inputModeButton.offsetWidth, 420); // ограничим ширину
-                modalContent.style.width = w + 'px';
-                modalContent.style.minWidth = '220px';
-                modalContent.style.maxWidth = '90vw';
-            } else {
-                modalContent.style.minWidth = '220px';
-                modalContent.style.maxWidth = '90vw';
-            }
-            modalContent.style.maxHeight = '80vh'; // ограничим высоту
-            modalContent.style.overflowY = 'auto';
-        }
-        setArchiveModalWidth();
-        window.addEventListener('resize', setArchiveModalWidth);
-
-        // Заголовок
-        const title = document.createElement('div');
-        title.textContent = 'Удаление данных';
-        title.style.fontSize = '13px';
-        title.style.fontWeight = '500';
-        title.style.marginBottom = '18px';
-        title.style.fontFamily = 'Inter, sans-serif';
-        modalContent.appendChild(title);
-
-        // Получаем список курьеров
-        const couriersSnap = await get(query(ref(database, 'couriers')));
-        let couriers = [];
-        if (couriersSnap.exists()) {
-            couriersSnap.forEach(child => {
-                const c = child.val();
-                if (c.name) couriers.push({ name: c.name, id: child.key });
-            });
-        }
-    couriers = [...new Set(couriers.map(c => c.name))].sort((a, b) => a.localeCompare(b, 'ru'));
-
-        // Выбор курьера
-        const courierSelect = document.createElement('select');
-        courierSelect.style.width = '100%';
-        courierSelect.style.marginBottom = '18px';
-        courierSelect.style.fontSize = '13px';
-        courierSelect.style.padding = '7px 0 7px 10px';
-        courierSelect.style.borderRadius = '10px';
-        courierSelect.style.border = 'none';
-        courierSelect.style.background = '#3f51b5';
-        courierSelect.style.color = '#fff';
-        courierSelect.style.fontFamily = 'Inter, sans-serif';
-        courierSelect.style.boxShadow = '0 1px 4px rgba(0,0,0,0.08)';
-        courierSelect.style.outline = 'none';
-        courierSelect.classList.add('archive-courier-select');
-
-        modalContent.appendChild(courierSelect);
-
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Выберите курьера';
-        courierSelect.appendChild(defaultOption);
-        couriers.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            courierSelect.appendChild(opt);
-        });
-
-        // После добавления всех курьеров в select
-        const allOption = document.createElement('option');
-        allOption.value = '__all__';
-        allOption.textContent = 'Все';
-        courierSelect.appendChild(allOption);
-
-        // Кнопка удаления курьера (перемещаем сразу после select)
-    // Кнопка удаления у выбранного курьера
-    const deleteCourierBtn = document.createElement('button');
-    deleteCourierBtn.textContent = 'Удалить курьера';
-        deleteCourierBtn.style.background = '#ea1e63';
-        deleteCourierBtn.style.color = '#fff';
-        deleteCourierBtn.style.border = 'none';
-        deleteCourierBtn.style.borderRadius = '18px';
-        deleteCourierBtn.style.fontSize = '13px';
-        deleteCourierBtn.style.fontWeight = '500';
-        deleteCourierBtn.style.fontFamily = 'Inter, sans-serif';
-        deleteCourierBtn.style.padding = '12px 0 10px 0';
-        deleteCourierBtn.style.width = '100%';
-        deleteCourierBtn.style.marginTop = '8px';
-        deleteCourierBtn.style.cursor = 'pointer';
-        deleteCourierBtn.classList.add('archive-delete-courier-btn');
-        modalContent.appendChild(deleteCourierBtn);
-
-        deleteCourierBtn.addEventListener('click', async () => {
-            const selectedCourier = courierSelect.value;
-            if (!selectedCourier) {
-                window.showMessage('error', 'Выберите курьера для удаления');
-                return;
-            }
-            if (selectedCourier === '__all__') {
-                // Модальное окно подтверждения для удаления всех курьеров
-                const confirmModal = document.createElement('div');
-                confirmModal.style.position = 'fixed';
-                confirmModal.style.top = '0';
-                confirmModal.style.left = '0';
-                confirmModal.style.width = '100vw';
-                confirmModal.style.height = '100vh';
-                confirmModal.style.background = 'rgba(0,0,0,0.7)';
-                confirmModal.style.display = 'flex';
-                confirmModal.style.alignItems = 'center';
-                confirmModal.style.justifyContent = 'center';
-                confirmModal.style.zIndex = '10000';
-                confirmModal.addEventListener('click', () => confirmModal.remove());
-
-                const confirmBox = document.createElement('div');
-                confirmBox.style.background = '#3f51b5';
-                confirmBox.style.borderRadius = '24px';
-                confirmBox.style.padding = '28px 20px';
-                confirmBox.style.color = 'white';
-                confirmBox.style.textAlign = 'center';
-                confirmBox.style.position = 'relative';
-                confirmBox.style.fontFamily = 'Inter, sans-serif';
-                confirmBox.style.fontSize = '15px';
-                confirmBox.classList.add('archive-confirm-box');
-                confirmBox.innerHTML = `<div style=\"margin-bottom:18px;\">Вы действительно хотите удалить <b style='font-size:16px;'>всех курьеров</b>?</div>`;
-
-                const yesBtn = document.createElement('button');
-                yesBtn.textContent = 'Удалить всех курьеров';
-                yesBtn.style.background = '#ea1e63';
-                yesBtn.style.color = '#fff';
-                yesBtn.style.border = 'none';
-                yesBtn.style.borderRadius = '18px';
-                yesBtn.style.fontSize = '13px';
-                yesBtn.style.fontWeight = '500';
-                yesBtn.style.fontFamily = 'Inter, sans-serif';
-                yesBtn.style.padding = '10px 0';
-                yesBtn.style.width = '100%';
-                yesBtn.style.cursor = 'pointer';
-                yesBtn.style.marginBottom = '10px';
-                yesBtn.classList.add('archive-confirm-btn');
-                confirmBox.appendChild(yesBtn);
-
-                const noBtn = document.createElement('button');
-                noBtn.textContent = 'Отмена';
-                noBtn.style.background = 'none';
-                noBtn.style.color = '#fff';
-                noBtn.style.border = '1px solid #fff';
-                noBtn.style.borderRadius = '18px';
-                noBtn.style.fontSize = '13px';
-                noBtn.style.fontWeight = '500';
-                noBtn.style.fontFamily = 'Inter, sans-serif';
-                noBtn.style.padding = '10px 0';
-                noBtn.style.width = '100%';
-                noBtn.style.cursor = 'pointer';
-                noBtn.classList.add('archive-cancel-btn');
-                confirmBox.appendChild(noBtn);
-
-                confirmModal.appendChild(confirmBox);
-                document.body.appendChild(confirmModal);
-                noBtn.addEventListener('click', () => confirmModal.remove());
-                yesBtn.addEventListener('click', async () => {
-                    yesBtn.disabled = true;
-                    yesBtn.textContent = 'Удаление...';
-                    // Удаляем всех курьеров
-                    await set(ref(database, 'couriers'), null);
-                    yesBtn.textContent = 'Готово!';
-                    setTimeout(() => {
-                        confirmModal.remove();
-                        // Очищаем select
-                        while (courierSelect.options.length > 1) {
-                            courierSelect.remove(1);
-                        }
-                        showSuccessMessage('Все курьеры удалены!');
-                    }, 1200);
-                });
-                return;
-            }
-            // Модальное окно подтверждения
-            const confirmModal = document.createElement('div');
-            confirmModal.style.position = 'fixed';
-            confirmModal.style.top = '0';
-            confirmModal.style.left = '0';
-            confirmModal.style.width = '100vw';
-            confirmModal.style.height = '100vh';
-            confirmModal.style.background = 'rgba(0,0,0,0.7)';
-            confirmModal.style.display = 'flex';
-            confirmModal.style.alignItems = 'center';
-            confirmModal.style.justifyContent = 'center';
-            confirmModal.style.zIndex = '10000';
-            confirmModal.addEventListener('click', () => confirmModal.remove());
-
-            const confirmBox = document.createElement('div');
-            confirmBox.style.background = '#3f51b5';
-            confirmBox.style.borderRadius = '24px';
-            confirmBox.style.padding = '28px 20px';
-            confirmBox.style.color = 'white';
-            confirmBox.style.textAlign = 'center';
-            confirmBox.style.position = 'relative';
-            confirmBox.style.fontFamily = 'Inter, sans-serif';
-            confirmBox.style.fontSize = '15px';
-            confirmBox.classList.add('archive-confirm-box');
-            confirmBox.innerHTML = `<div style="margin-bottom:18px;">Вы действительно хотите удалить курьера <b style='font-size:16px;'>${selectedCourier}</b>?</div>`;
-
-            const yesBtn = document.createElement('button');
-            yesBtn.textContent = 'Удалить курьера';
-            yesBtn.style.background = '#ea1e63';
-            yesBtn.style.color = '#fff';
-            yesBtn.style.border = 'none';
-            yesBtn.style.borderRadius = '18px';
-            yesBtn.style.fontSize = '13px';
-            yesBtn.style.fontWeight = '500';
-            yesBtn.style.fontFamily = 'Inter, sans-serif';
-            yesBtn.style.padding = '10px 0';
-            yesBtn.style.width = '100%';
-            yesBtn.style.cursor = 'pointer';
-            yesBtn.style.marginBottom = '10px';
-            yesBtn.classList.add('archive-confirm-btn');
-            confirmBox.appendChild(yesBtn);
-
-            const noBtn = document.createElement('button');
-            noBtn.textContent = 'Отмена';
-            noBtn.style.background = 'none';
-            noBtn.style.color = '#fff';
-            noBtn.style.border = '1px solid #fff';
-            noBtn.style.borderRadius = '18px';
-            noBtn.style.fontSize = '13px';
-            noBtn.style.fontWeight = '500';
-            noBtn.style.fontFamily = 'Inter, sans-serif';
-            noBtn.style.padding = '10px 0';
-            noBtn.style.width = '100%';
-            noBtn.style.cursor = 'pointer';
-            noBtn.classList.add('archive-cancel-btn');
-            confirmBox.appendChild(noBtn);
-
-            confirmModal.appendChild(confirmBox);
-            document.body.appendChild(confirmModal);
-            noBtn.addEventListener('click', () => confirmModal.remove());
-            yesBtn.addEventListener('click', async () => {
-                yesBtn.disabled = true;
-                yesBtn.textContent = 'Удаление...';
-                // Удаляем курьера из базы
-                const couriersSnap = await get(query(ref(database, 'couriers')));
-                if (couriersSnap.exists()) {
-                    couriersSnap.forEach(child => {
-                        const c = child.val();
-                        if (c.name === selectedCourier) {
-                            set(child.ref, null);
-                        }
-                    });
-                }
-                yesBtn.textContent = 'Готово!';
-                setTimeout(() => {
-                    confirmModal.remove();
-                    // Обновляем выпадающий список курьеров
-                    while (courierSelect.options.length > 1) {
-                        courierSelect.remove(1);
-                    }
-                    // Получаем обновлённый список курьеров
-                    get(query(ref(database, 'couriers'))).then(snap => {
-                        let updated = [];
-                        if (snap.exists()) {
-                            snap.forEach(child => {
-                                const c = child.val();
-                                if (c.name) updated.push(c.name);
-                            });
-                        }
-                        updated = [...new Set(updated)].sort((a, b) => a.localeCompare(b, 'ru'));
-                        updated.forEach(name => {
-                            const opt = document.createElement('option');
-                            opt.value = name;
-                            opt.textContent = name;
-                            courierSelect.appendChild(opt);
-                        });
-                    });
-                }, 1200);
-            });
-        });
-
-        // После добавления кнопки 'Удалить курьера'
-        const deleteCourierDeliveriesBtn = document.createElement('button');
-deleteCourierDeliveriesBtn.textContent = 'Удалить передачи у курьера';
-deleteCourierDeliveriesBtn.style.background = '#ea1e63';
-deleteCourierDeliveriesBtn.style.color = '#fff';
-deleteCourierDeliveriesBtn.style.border = 'none';
-deleteCourierDeliveriesBtn.style.borderRadius = '18px';
-deleteCourierDeliveriesBtn.style.fontSize = '13px';
-deleteCourierDeliveriesBtn.style.fontWeight = '500';
-deleteCourierDeliveriesBtn.style.fontFamily = 'Inter, sans-serif';
-deleteCourierDeliveriesBtn.style.padding = '12px 0 10px 0';
-deleteCourierDeliveriesBtn.style.width = '100%';
-deleteCourierDeliveriesBtn.style.marginTop = '8px';
-deleteCourierDeliveriesBtn.style.cursor = 'pointer';
-deleteCourierDeliveriesBtn.classList.add('archive-delete-btn');
-modalContent.appendChild(deleteCourierDeliveriesBtn);
-
-deleteCourierDeliveriesBtn.addEventListener('click', async () => {
-    const selectedCourier = courierSelect.value;
-    if (!selectedCourier) {
-        window.showMessage('error', 'Выберите курьера для удаления передач');
-        return;
-    }
-    // Модальное окно подтверждения
-    const confirmModal = document.createElement('div');
-    confirmModal.style.position = 'fixed';
-    confirmModal.style.top = '0';
-    confirmModal.style.left = '0';
-    confirmModal.style.width = '100vw';
-    confirmModal.style.height = '100vh';
-    confirmModal.style.background = 'rgba(0,0,0,0.7)';
-    confirmModal.style.display = 'flex';
-    confirmModal.style.alignItems = 'center';
-    confirmModal.style.justifyContent = 'center';
-    confirmModal.style.zIndex = '10000';
-    confirmModal.addEventListener('click', () => confirmModal.remove());
-
-    const confirmBox = document.createElement('div');
-    confirmBox.style.background = '#3f51b5';
-    confirmBox.style.borderRadius = '24px';
-    confirmBox.style.padding = '28px 20px';
-    confirmBox.style.color = 'white';
-    confirmBox.style.textAlign = 'center';
-    confirmBox.style.position = 'relative';
-    confirmBox.style.fontFamily = 'Inter, sans-serif';
-    confirmBox.style.fontSize = '15px';
-    confirmBox.classList.add('archive-confirm-box');
-    confirmBox.innerHTML = `<div style="margin-bottom:18px;">Вы действительно хотите удалить все передачи у <b style='font-size:16px;'>${selectedCourier}</b>?</div>`;
-
-    const yesBtn = document.createElement('button');
-    yesBtn.textContent = 'Удалить передачи';
-    yesBtn.style.background = '#ea1e63';
-    yesBtn.style.color = '#fff';
-    yesBtn.style.border = 'none';
-    yesBtn.style.borderRadius = '18px';
-    yesBtn.style.fontSize = '13px';
-    yesBtn.style.fontWeight = '500';
-    yesBtn.style.fontFamily = 'Inter, sans-serif';
-    yesBtn.style.padding = '10px 0';
-    yesBtn.style.width = '100%';
-    yesBtn.style.cursor = 'pointer';
-    yesBtn.style.marginBottom = '10px';
-    yesBtn.classList.add('archive-confirm-btn');
-    confirmBox.appendChild(yesBtn);
-
-    const noBtn = document.createElement('button');
-    noBtn.textContent = 'Отмена';
-    noBtn.style.background = 'none';
-    noBtn.style.color = '#fff';
-    noBtn.style.border = '1px solid #fff';
-    noBtn.style.borderRadius = '18px';
-    noBtn.style.fontSize = '13px';
-    noBtn.style.fontWeight = '500';
-    noBtn.style.fontFamily = 'Inter, sans-serif';
-    noBtn.style.padding = '10px 0';
-    noBtn.style.width = '100%';
-    noBtn.style.cursor = 'pointer';
-    noBtn.classList.add('archive-cancel-btn');
-    confirmBox.appendChild(noBtn);
-
-    confirmModal.appendChild(confirmBox);
-    document.body.appendChild(confirmModal);
-    noBtn.addEventListener('click', () => confirmModal.remove());
-    yesBtn.addEventListener('click', async () => {
-        yesBtn.disabled = true;
-        yesBtn.textContent = 'Удаление...';
-        // Удаляем передачи выбранного курьера
-        const deliveriesRef = ref(database, 'deliveries');
-        const deliveriesSnap = await get(deliveriesRef);
-        if (deliveriesSnap.exists()) {
-            deliveriesSnap.forEach(child => {
-                const d = child.val();
-                if (d.courier_name === selectedCourier) {
-                    set(child.ref, null);
-                }
-            });
-        }
-        yesBtn.textContent = 'Готово!';
-        setTimeout(() => {
-            confirmModal.remove();
-            window.showMessage('success', '', '', '', `Передачи курьера "${selectedCourier}" удалены!`);
-        }, 1200);
-    });
-});
-
-const deleteAllDeliveriesBtn = document.createElement('button');
-deleteAllDeliveriesBtn.textContent = 'Удалить все передачи';
-deleteAllDeliveriesBtn.style.background = '#ea1e63';
-deleteAllDeliveriesBtn.style.color = '#fff';
-deleteAllDeliveriesBtn.style.border = 'none';
-deleteAllDeliveriesBtn.style.borderRadius = '18px';
-deleteAllDeliveriesBtn.style.fontSize = '13px';
-deleteAllDeliveriesBtn.style.fontWeight = '500';
-deleteAllDeliveriesBtn.style.fontFamily = 'Inter, sans-serif';
-deleteAllDeliveriesBtn.style.padding = '12px 0 10px 0';
-deleteAllDeliveriesBtn.style.width = '100%';
-deleteAllDeliveriesBtn.style.marginTop = '8px';
-deleteAllDeliveriesBtn.style.cursor = 'pointer';
-deleteAllDeliveriesBtn.classList.add('archive-delete-all-btn');
-modalContent.appendChild(deleteAllDeliveriesBtn);
-
-deleteAllDeliveriesBtn.addEventListener('click', async () => {
-    if (!confirm('Удалить все передачи и сканы для всех курьеров?')) return;
-    await set(ref(database, 'deliveries'), null);
-    window.showMessage('success', '', '', '', 'Все передачи удалены!');
-});
-
-        archiveModal.appendChild(modalContent);
-        document.body.appendChild(archiveModal);
-    });
-
-    // Модальное окно для вывода статистики по курьеру (оставляем как было)
-    let courierStatsModal = null;
-    let courierStatsModalContent = null;
-    function showCourierStatsModal(courierName) {
-        if (courierStatsModal) courierStatsModal.remove();
-        courierStatsModal = document.createElement('div');
-        courierStatsModal.style.position = 'fixed';
-        courierStatsModal.style.top = '0';
-        courierStatsModal.style.left = '0';
-        courierStatsModal.style.width = '100vw';
-        courierStatsModal.style.height = '100vh';
-        courierStatsModal.style.background = 'rgba(0,0,0,0.7)';
-        courierStatsModal.style.display = 'flex';
-        courierStatsModal.style.alignItems = 'center';
-        courierStatsModal.style.justifyContent = 'center';
-        courierStatsModal.style.zIndex = '9999';
-        courierStatsModal.addEventListener('click', () => courierStatsModal.remove());
-
-        const modalContent = document.createElement('div');
-        modalContent.style.background = '#3f51b5';
-        modalContent.style.borderRadius = '32px';
-        modalContent.style.padding = '32px 24px';
-        modalContent.style.color = 'white';
-        modalContent.style.textAlign = 'center';
-        modalContent.style.position = 'relative';
-        modalContent.style.fontFamily = 'Inter, sans-serif';
-        modalContent.style.fontSize = '13px';
-        modalContent.classList.add('courierStatsModalContent');
-        modalContent.style.maxHeight = '80vh';
-        modalContent.style.overflowY = 'auto';
-        courierStatsModalContent = modalContent;
-        setModalContentWidth(modalContent);
-
-        const title = document.createElement('div');
-        title.textContent = courierName;
-        title.style.fontSize = '13px';
-        title.style.fontWeight = '500';
-        title.style.marginBottom = '18px';
-        title.style.fontFamily = 'Inter, sans-serif';
-        modalContent.appendChild(title);
-
-        // Добавим кнопку закрытия для удобства
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = '×';
-        closeBtn.style.position = 'absolute';
-        closeBtn.style.top = '12px';
-        closeBtn.style.right = '18px';
-        closeBtn.style.background = 'none';
-        closeBtn.style.border = 'none';
-        closeBtn.style.color = '#fff';
-        closeBtn.style.fontSize = '22px';
-        closeBtn.style.cursor = 'pointer';
-        closeBtn.style.fontFamily = 'Inter, sans-serif';
-        closeBtn.addEventListener('click', () => courierStatsModal.remove());
-        modalContent.appendChild(closeBtn);
-
-        // Получаем все передачи и сканы для этого курьера
-        Promise.all([
-            get(query(ref(database, 'deliveries'))),
-            get(query(ref(database, 'scans')))
-        ]).then(([deliveriesSnap, scansSnap]) => {
-            const allDeliveries = [];
-            if (deliveriesSnap.exists()) {
-                deliveriesSnap.forEach(child => {
-                    const d = child.val();
-                    if (d.courier_name === courierName) allDeliveries.push(d.id);
-                });
-            }
-            const scanned = new Set();
-            if (scansSnap.exists()) {
-                scansSnap.forEach(child => {
-                    const s = child.val();
-                    if (s.courier_name === courierName) scanned.add(s.delivery_id);
-                });
-            }
-            // Неотсканированные сверху, отсканированные снизу (opacity 0.6)
-            const notScanned = allDeliveries.filter(id => !scanned.has(id));
-            const scannedList = allDeliveries.filter(id => scanned.has(id));
-            const list = document.createElement('div');
-            list.style.display = 'flex';
-            list.style.flexDirection = 'column';
-            list.style.gap = '6px';
-            list.style.maxHeight = '55vh';
-            list.style.overflowY = 'auto';
-            notScanned.forEach(id => {
-                const el = document.createElement('div');
-                el.textContent = id;
-                el.style.fontSize = '13px';
-                el.style.opacity = '1';
-                el.style.transition = 'opacity 0.3s';
-                el.style.fontFamily = 'Inter, sans-serif';
-                list.appendChild(el);
-            });
-            scannedList.forEach(id => {
-                const el = document.createElement('div');
-                el.textContent = id;
-                el.classList.add('scanned'); // Класс для перечеркивания и прозрачности
-                el.style.opacity = '0.6';
-                el.style.fontSize = '13px';
-                el.style.transition = 'opacity 0.3s';
-                el.style.fontFamily = 'Inter, sans-serif';
-                list.appendChild(el);
-            });
-            modalContent.appendChild(list);
-        });
-
-        courierStatsModal.appendChild(modalContent);
-        document.body.appendChild(courierStatsModal);
-    }
-
-    processButton.addEventListener('click', async () => {
-        // Получаем список всех курьеров
-        const couriersSnap = await get(query(ref(database, 'couriers')));
-        let couriers = [];
-        if (couriersSnap.exists()) {
-            couriersSnap.forEach(child => {
-                const c = child.val();
-                if (c.name) couriers.push(c.name);
-            });
-        }
-    couriers = [...new Set(couriers)].sort((a, b) => a.localeCompare(b, 'ru'));
-        // Показываем выбор курьера
-        const selectModal = document.createElement('div');
-        selectModal.style.position = 'fixed';
-        selectModal.style.top = '0';
-        selectModal.style.left = '0';
-        selectModal.style.width = '100vw';
-        selectModal.style.height = '100vh';
-        selectModal.style.background = 'rgba(0,0,0,0.7)';
-        selectModal.style.display = 'flex';
-        selectModal.style.alignItems = 'center';
-        selectModal.style.justifyContent = 'center';
-        selectModal.style.zIndex = '9999';
-        selectModal.addEventListener('click', () => selectModal.remove());
-        const modalContent = document.createElement('div');
-        modalContent.style.background = '#3f51b5';
-        modalContent.style.borderRadius = '32px';
-        modalContent.style.padding = '32px 24px';
-        modalContent.style.color = 'white';
-        modalContent.style.textAlign = 'center';
-        modalContent.style.position = 'relative';
-        modalContent.style.fontFamily = 'Inter, sans-serif';
-        modalContent.style.fontSize = '13px';
-        modalContent.classList.add('select-modal-content');
-        modalContent.style.maxHeight = '80vh';
-        modalContent.style.overflowY = 'auto';
-        setModalContentWidth(modalContent);
-
-        const title = document.createElement('div');
-        title.textContent = 'Выберите курьера';
-        title.style.fontSize = '13px';
-        title.style.fontWeight = '500';
-        title.style.marginBottom = '18px';
-        title.style.fontFamily = 'Inter, sans-serif';
-        modalContent.appendChild(title);
-        couriers.forEach(name => {
-            const btn = document.createElement('button');
-            btn.textContent = name;
-            btn.style.display = 'block';
-            btn.style.width = '100%';
-            btn.style.margin = '8px 0';
-            btn.style.padding = '10px 0';
-            btn.style.background = '#ea1e63';
-            btn.style.color = 'white';
-            btn.style.border = 'none';
-            btn.style.borderRadius = '18px';
-            btn.style.fontSize = '13px';
-            btn.style.fontWeight = '500';
-            btn.style.fontFamily = 'Inter, sans-serif';
-            btn.style.cursor = 'pointer';
-            btn.addEventListener('click', () => {
-                selectModal.remove();
-                showCourierStatsModal(name);
-            });
-            modalContent.appendChild(btn);
-        });
-        selectModal.appendChild(modalContent);
-        document.body.appendChild(selectModal);
-    });
-
-    // --- Удаление курьеров ---
-const deleteCouriersButton = document.getElementById('deleteCouriersButton');
-const couriersDeleteList = document.getElementById('couriersDeleteList');
-
-// Получить и отсортировать курьеров по алфавиту
-function fetchAndRenderCouriersForDelete() {
-    couriersDeleteList.innerHTML = '<div style="color:#888;font-size:14px;">Загрузка...</div>';
-    firebase.database().ref('couriers').once('value', snapshot => {
-        const couriers = snapshot.val() || {};
-        const courierArr = Object.entries(couriers).map(([id, data]) => ({ id, name: data.name || '' }));
-        courierArr.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-        if (courierArr.length === 0) {
-            couriersDeleteList.innerHTML = '<div style="color:#888;font-size:14px;">Нет курьеров для удаления</div>';
+    function hideCameraMenu() {
+        if (!dom.cameraSelect) {
             return;
         }
-        couriersDeleteList.innerHTML = `
-            <form id="couriersDeleteForm">
-                ${courierArr.map(c => `
-                    <label style="display:flex;align-items:center;margin-bottom:8px;font-size:15px;">
-                        <input type="checkbox" name="courier" value="${c.id}" style="margin-right:8px;">
-                        ${c.name}
-                    </label>
-                `).join('')}
-                <button type="submit" style="background:#ea1e63;color:white;border:none;padding:8px 20px;border-radius:20px;font-size:14px;cursor:pointer;margin-top:12px;">Удалить выбранных</button>
-            </form>
-        `;
-        document.getElementById('couriersDeleteForm').onsubmit = function(e) {
-            e.preventDefault();
-            const checked = Array.from(this.elements.courier).filter(cb => cb.checked).map(cb => cb.value);
-            if (checked.length === 0) return;
-            Promise.all(checked.map(id => firebase.database().ref('couriers/' + id).remove()))
-                .then(() => {
-                    fetchAndRenderCouriersForDelete();
-                });
-        };
-    });
-}
 
-deleteCouriersButton.onclick = function() {
-    couriersDeleteList.style.display = couriersDeleteList.style.display === 'none' ? 'block' : 'none';
-    if (couriersDeleteList.style.display === 'block') {
-        fetchAndRenderCouriersForDelete();
-    }
-};
-// Логика удаления курьера теперь реализуется в archive-modal-content
-
-    // === ОБНОВЛЕНИЕ ШИРИНЫ И СТИЛЕЙ МОДАЛОК И ВСПЛЫВАЮЩИХ ОКОН ПРИ РЕСАЙЗЕ ===
-    function updateAllModalWidths() {
-        setModalContentWidth(archiveModalContent);
-        setModalContentWidth(courierStatsModalContent);
-        // Для selectModal ищем по классу, т.к. он создается динамически
-        const selectModalContent = document.querySelector('.select-modal-content');
-        if (selectModalContent) setModalContentWidth(selectModalContent);
-        // Для всплывающего окна результата
-        syncOverlayStyles();
-    }
-    window.addEventListener('resize', updateAllModalWidths);
-    updateAllModalWidths();
-
-    // Функции
-    function parseRawData(text) {
-        if (!text || typeof text !== 'string') return { courierName: '', deliveryIds: [] };
-        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-        if (lines.length === 0) return { courierName: '', deliveryIds: [] };
-
-        // Фамилия — только первое слово первой строки, только буквы (рус/лат)
-        const firstLine = lines[0];
-        const courierNameMatch = firstLine.match(/^([А-Яа-яA-ZaZ]+)/);
-        const courierName = courierNameMatch ? courierNameMatch[1] : '';
-
-        // Все 10-значные числа из всех строк
-        const deliveryIds = lines
-            .map(line => line.match(/\b\d{10}\b/g))
-            .filter(Boolean)
-            .flat();
-
-        return { courierName, deliveryIds };
+        dom.cameraSelect.style.display = 'none';
+        dom.cameraSelect.style.position = '';
+        dom.cameraSelect.style.left = '';
+        dom.cameraSelect.style.top = '';
+        dom.cameraSelect.style.width = '';
+        dom.cameraSelect.style.minWidth = '';
+        dom.cameraSelect.style.maxWidth = '';
+        restoreCameraSelectToHomeHost();
+        cameraMenuVisible = false;
     }
 
-    async function saveCourierAndDeliveries(courierName, deliveryIds) {
-        if (!courierName || !deliveryIds || deliveryIds.length === 0) {
-            showMessage('error', 'Нет данных для сохранения', '', '', '');
+    function positionCameraMenu(anchorElement) {
+        if (!dom.cameraSelect || !anchorElement) {
             return;
         }
-        try {
-            console.log('Сохранение курьера:', courierName, 'и передач:', deliveryIds);
-            const couriersRef = ref(database, 'couriers');
-            const deliveriesRef = ref(database, 'deliveries');
-            const newCourierRef = push(couriersRef);
-            await set(newCourierRef, {
-                name: courierName,
-                timestamp: Date.now()
-            });
-            const courierId = newCourierRef.key;
-            if (!courierId) throw new Error('Не удалось получить ID курьера');
-            console.log('Курьер сохранен с ID:', courierId);
-            for (const id of deliveryIds) {
-                if (!id) continue;
-                const newDeliveryRef = push(deliveriesRef);
-                await set(newDeliveryRef, {
-                    id,
-                    courier_id: courierId,
-                    courier_name: courierName,
-                    timestamp: Date.now()
-                });
-                console.log('Передача сохранена с ID:', id);
-            }
-            showMessage('success', '', `Добавлен курьер: ${courierName}`, `Передач: ${deliveryIds.length}`);
-        } catch (e) {
-            console.error("Ошибка сохранения в Firebase: ", e);
-            showMessage('error', 'Ошибка при сохранении', '', '', '');
-        }
+
+        const rect = anchorElement.getBoundingClientRect();
+        const viewportPadding = 16;
+        const menuWidth = Math.min(
+            Math.max(rect.width, 180),
+            window.innerWidth - viewportPadding * 2,
+        );
+        const left = Math.min(
+            Math.max(viewportPadding, rect.left),
+            Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding),
+        );
+        const top = Math.min(rect.bottom + 8, window.innerHeight - 56);
+
+        dom.cameraSelect.style.position = 'fixed';
+        dom.cameraSelect.style.left = `${left}px`;
+        dom.cameraSelect.style.top = `${top}px`;
+        dom.cameraSelect.style.width = `${menuWidth}px`;
+        dom.cameraSelect.style.minWidth = `${menuWidth}px`;
+        dom.cameraSelect.style.maxWidth = `${menuWidth}px`;
     }
 
-    async function startQrScanner(cameraIdOverride) {
-        try {
-            if (!qrIcons.length) throw new Error('qrIcons не найдены');
-            if (qrSpinner) qrSpinner.classList.add('active');
-            hideAllQrIcons();
-            let cameraIdToUse = cameraIdOverride || selectedCameraId;
-            // Для iOS всегда environment, не переключаем на фронтальную
-            if (isIOS()) {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 480, max: 480 },
-                        height: { ideal: 480, max: 480 },
-                        aspectRatio: 1
-                    }
-                });
+    async function toggleCameraMenu(anchorElement = null) {
+        if (!dom.cameraSelect) {
+            return;
+        }
+
+        if (!cameraMenuVisible) {
+            await camera.updateCameraList();
+            if (anchorElement) {
+                if (dom.cameraSelect.parentElement !== document.body) {
+                    document.body.appendChild(dom.cameraSelect);
+                }
+                positionCameraMenu(anchorElement);
             } else {
-                if (!cameraIdToUse) {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const cameras = devices.filter(device => device.kind === 'videoinput');
-                    let camera = cameras.find(c => c.label && /camera2 2,? facing back/i.test(c.label));
-                    if (!camera) camera = cameras.find(c => c.label && /back/i.test(c.label));
-                    if (!camera) camera = cameras.find(c => c.label && /wide/i.test(c.label));
-                    if (!camera) camera = cameras[0] || null;
-                    cameraIdToUse = camera ? camera.deviceId : null;
-                }
-                if (cameraIdToUse) {
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: {
-                            deviceId: { exact: cameraIdToUse },
-                            facingMode: { ideal: "environment" },
-                            width: { ideal: 480, max: 480 },
-                            height: { ideal: 480, max: 480 },
-                            aspectRatio: 1
-                        }
-                    });
-                } else {
-                    showMessage('error', 'Камеры не найдены на устройстве', '', '', '');
-                    showAllQrIcons();Ы
-                    if (qrSpinner) qrSpinner.classList.remove('active');
-                    return;
-                }
+                restoreCameraSelectToHomeHost();
+                dom.cameraSelect.style.position = '';
+                dom.cameraSelect.style.left = '';
+                dom.cameraSelect.style.top = '';
+                dom.cameraSelect.style.width = '';
+                dom.cameraSelect.style.minWidth = '';
+                dom.cameraSelect.style.maxWidth = '';
             }
-            if (!videoElement) throw new Error('videoElement не найден');
-            videoElement.srcObject = stream;
-            videoElement.style.objectFit = 'cover';
-            videoElement.style.width = '100%';
-            videoElement.style.height = '100%';
-            videoElement.style.aspectRatio = '1/1';
-            await videoElement.play();
-            if (qrSpinner) qrSpinner.classList.remove('active');
-            if (!codeReader) {
-                codeReader = new ZXing.BrowserMultiFormatReader();
-            }
-            codeReader.decodeFromVideoDevice(cameraIdToUse, 'qr-video', (result, err) => {
-                if (result) {
-                    onScanSuccess(result.getText());
-                    codeReader.reset();
-                    stopQrScanner();
-                }
-                if (err && !(err instanceof ZXing.NotFoundException)) {
-                    console.error('Ошибка сканирования:', err);
-                }
-            });
-        } catch (err) {
-            console.error('Ошибка камеры:', err.name, err.message, err.constraint);
-            showMessage('error', 'Ошибка камеры: ' + (err.message || err), '', '', '');
-            showAllQrIcons();
-            if (qrSpinner) qrSpinner.classList.remove('active');
-        } finally {
-            if (qrSpinner && (!stream || !videoElement || videoElement.paused)) {
-                qrSpinner.classList.remove('active');
-            }
+            dom.cameraSelect.style.display = 'inline-block';
+            dom.cameraSelect.focus();
+            cameraMenuVisible = true;
+            return;
         }
+
+        hideCameraMenu();
     }
 
-    function onScanSuccess(decodedText) {
+    function openSettingsModal() {
+        const modal = ui.createModal({
+            modalId: 'settingsModal',
+            className: 'data-entry-modal-content',
+            maxButtonWidth: 420,
+        });
+
+        const title = document.createElement('div');
+        title.textContent = 'Настройки';
+        title.className = 'data-entry-modal-title';
+
+        const cameraButton = ui.createPrimaryButton('Выбор камеры', {
+            className: 'data-entry-submit-button',
+        });
+
+        cameraButton.addEventListener('click', async () => {
+            modal.close();
+            await toggleCameraMenu();
+        });
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(cameraButton);
+    }
+
+    function openDataEntryPagePanel(options = {}) {
+        setActiveBottomNav('data');
+        const page = ui.showAppPage({
+            bodyClassName: 'data-entry-screen',
+            direction: options.direction,
+            pageId: 'dataEntryPage',
+            title: 'Данные',
+        });
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'data-entry-textarea';
+        textarea.placeholder = 'Введите нарпавление/имя курьера и список передач.';
+        textarea.value = dom.sidebarDataInput?.value || '';
+
+        const submitButton = ui.createPrimaryButton('Сохранить', {
+            className: 'data-entry-submit-button',
+        });
+
+        submitButton.addEventListener('click', async () => {
+            submitButton.disabled = true;
+            const isSaved = await saveRawData(textarea.value.trim());
+            submitButton.disabled = false;
+
+            if (isSaved) {
+                if (dom.sidebarDataInput) {
+                    dom.sidebarDataInput.value = '';
+                }
+                showScannerHomePage({
+                    direction: 'forward',
+                });
+                return;
+            }
+
+            textarea.focus();
+        });
+
+        page.body.appendChild(textarea);
+        page.body.appendChild(submitButton);
+
+        window.setTimeout(() => {
+            if (document.body.contains(textarea)) {
+                textarea.focus();
+            }
+        }, 360);
+    }
+
+    function openSettingsPagePanel(options = {}) {
+        setActiveBottomNav('settings');
+        const page = ui.showAppPage({
+            bodyClassName: 'settings-screen',
+            direction: options.direction,
+            pageId: 'settingsPage',
+            title: 'Настройки',
+        });
+
+        const card = document.createElement('div');
+        card.className = 'app-page-card';
+
+        function decorateSettingsButton(button, iconMarkup, label) {
+            button.classList.add('settings-panel-button');
+            button.textContent = '';
+
+            const icon = document.createElement('span');
+            icon.className = 'settings-panel-button-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = iconMarkup;
+
+            const text = document.createElement('span');
+            text.className = 'settings-panel-button-label';
+            text.textContent = label;
+
+            const spacer = document.createElement('span');
+            spacer.className = 'settings-panel-button-spacer';
+            spacer.setAttribute('aria-hidden', 'true');
+
+            button.appendChild(icon);
+            button.appendChild(text);
+            button.appendChild(spacer);
+        }
+
+        const themeButton = ui.createPrimaryButton('Тема приложения', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            themeButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 4.5V6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M12 17.5V19.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M4.5 12H6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M17.5 12H19.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M6.7 6.7L8.1 8.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M15.9 15.9L17.3 17.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M17.3 6.7L15.9 8.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M8.1 15.9L6.7 17.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M15.5 12C15.5 13.933 13.933 15.5 12 15.5C10.067 15.5 8.5 13.933 8.5 12C8.5 10.067 10.067 8.5 12 8.5C13.933 8.5 15.5 10.067 15.5 12Z" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+            `,
+            'Тема приложения'
+        );
+
+        const themeSelector = document.createElement('div');
+        themeSelector.className = 'theme-selector';
+
+        const themeRadioGroup = document.createElement('div');
+        themeRadioGroup.className = 'theme-radio-group';
+
+        const blueThemeButton = document.createElement('button');
+        blueThemeButton.type = 'button';
+        blueThemeButton.className = 'theme-radio-button';
+        blueThemeButton.textContent = 'Синяя';
+
+        const darkThemeButton = document.createElement('button');
+        darkThemeButton.type = 'button';
+        darkThemeButton.className = 'theme-radio-button';
+        darkThemeButton.textContent = 'Темная';
+
+        function syncThemeSelector(themeName) {
+            const isDark = themeName === 'dark';
+            blueThemeButton.classList.toggle('is-active', !isDark);
+            darkThemeButton.classList.toggle('is-active', isDark);
+            themeRadioGroup.style.setProperty('--theme-active-index', isDark ? '1' : '0');
+            themeRadioGroup.setAttribute('data-theme-preview', isDark ? 'dark' : 'blue');
+        }
+
+        blueThemeButton.addEventListener('click', () => {
+            syncThemeSelector(applyTheme('blue'));
+        });
+
+        darkThemeButton.addEventListener('click', () => {
+            syncThemeSelector(applyTheme('dark'));
+        });
+
+        themeRadioGroup.appendChild(blueThemeButton);
+        themeRadioGroup.appendChild(darkThemeButton);
+        themeSelector.appendChild(themeRadioGroup);
+
+        themeButton.addEventListener('click', () => {
+            themeSelector.classList.toggle('is-open');
+        });
+
+        syncThemeSelector(document.body.dataset.theme || 'blue');
+
+        const cameraButton = ui.createPrimaryButton('Выбор камеры', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            cameraButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 8.5C4 7.67157 4.67157 7 5.5 7H8L9.4 5.6C9.77574 5.22426 10.2852 5 10.8166 5H13.1834C13.7148 5 14.2243 5.22426 14.6 5.6L16 7H18.5C19.3284 7 20 7.67157 20 8.5V16.5C20 17.3284 19.3284 18 18.5 18H5.5C4.67157 18 4 17.3284 4 16.5V8.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M12 14.75C13.5188 14.75 14.75 13.5188 14.75 12C14.75 10.4812 13.5188 9.25 12 9.25C10.4812 9.25 9.25 10.4812 9.25 12C9.25 13.5188 10.4812 14.75 12 14.75Z" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+            `,
+            'Выбор камеры'
+        );
+
+        cameraButton.addEventListener('click', async () => {
+            await toggleCameraMenu(cameraButton);
+        });
+
+        card.appendChild(themeButton);
+        card.appendChild(themeSelector);
+        card.appendChild(cameraButton);
+        page.body.appendChild(card);
+    }
+
+    function showScannerHomePage(options = {}) {
+        setActiveBottomNav('home');
+        ui.showHomeScreen({
+            direction: options.direction,
+        });
+        document.getElementById('transferSelectModal')?._cleanupModal?.();
+
+        ui.clearScanResult();
+        ui.hideManualInput();
+        ui.setVideoVisible(Boolean(state.scannerActive));
+        ui.setQrViewportState(state.scannerActive ? 'scanning' : 'idle');
+
+        hideCameraMenu();
+    }
+
+    function showScannerHome() {
+        [
+            'dataEntryModal',
+            'settingsModal',
+            'transferSelectModal',
+        ].forEach((modalId) => {
+            document.getElementById(modalId)?._cleanupModal?.();
+        });
+
+        document
+            .querySelectorAll(
+                '.archive-modal-content, .courierStatsModalContent, .select-modal-content, .archive-confirm-box, .data-entry-modal-content',
+            )
+            .forEach((element) => {
+                element.parentElement?._cleanupModal?.() || element.parentElement?.remove();
+            });
+
+        ui.clearScanResult();
+        ui.hideManualInput();
+        ui.setVideoVisible(Boolean(state.scannerActive));
+        ui.setQrViewportState(state.scannerActive ? 'scanning' : 'idle');
+
+        hideCameraMenu();
+    }
+
+    if (dom.cameraSelect) {
+        dom.cameraSelect.addEventListener('change', async () => {
+            const restartIfActive =
+                state.activeRootScreen === 'home' && state.scannerActive;
+
+            debugCamera('camera_select_change', {
+                activeRootScreen: state.activeRootScreen,
+                restartIfActive,
+                selectedCameraId: dom.cameraSelect.value,
+            });
+            hideCameraMenu();
+            await camera.handleCameraSelection(dom.cameraSelect.value, {
+                restartIfActive,
+                source: state.activeRootScreen,
+            });
+        });
+    }
+
+    let lastCameraStopAt = 0;
+
+    function handleCameraStop(event) {
+        event?.preventDefault?.();
         const now = Date.now();
-        if (now - lastScanTime < scanDelay) return;
-        lastScanTime = now;
 
-        navigator.vibrate?.(200);
-        flashFrame();
-        processTransferId(decodedText).finally(() => {
-            // После завершения обработки — снова открыть камеру через 1 секунду
-            setTimeout(() => {
-                // Для iOS всегда environment
-                if (isIOS()) {
-                    startQrScanner(null);
-                } else {
-                    startQrScanner(selectedCameraId);
-                }
-            }, 1000); // Задержка 1 секунда, чтобы пользователь успел убрать QR
+        if (now - lastCameraStopAt < 300) {
+            return;
+        }
+
+        lastCameraStopAt = now;
+
+        camera.cancelPendingRestart();
+        camera.setAutoRestartAllowed(false);
+        camera.stopQrScanner({ manual: true, reason: 'camera_stop_button' });
+        ui.setQrViewportState('idle');
+        ui.setVideoVisible(false);
+        ui.clearScanResult();
+
+        debugCamera('camera_stop_button', {
+            activeRootScreen: state.activeRootScreen,
+            scannerActive: state.scannerActive,
+            scannerPhase: state.scannerPhase,
+            scannerStarting: state.scannerStarting,
+            selectedCameraId: state.selectedCameraId,
+            stopReason: state.stopReason,
+            hasStream: Boolean(state.stream),
+        });
+        hideCameraMenu();
+    }
+
+    if (dom.bottomDataButton) {
+        dom.bottomDataButton.addEventListener('click', () => {
+            openDataEntryPagePanel({
+                direction: getBottomNavDirection('data'),
+            });
         });
     }
 
-    function flashFrame() {
-        qrContainer.classList.remove('flash');
-        setTimeout(() => qrContainer.classList.add('flash'), 0);
-    }
-
-    async function processTransferId(transferId) {
-        if (isProcessing) return;
-        isProcessing = true;
-        if (loadingIndicator) loadingIndicator.style.display = 'block';
-        if (qrSpinner) qrSpinner.classList.add('active');
-        hideAllQrIcons();
-        try {
-            // Из QR берем либо 10-значное число, либо 4-значное
-            let cleanedId = '';
-            let isShort = false;
-            const match10 = transferId.match(/\b\d{10}\b/);
-            const match4 = transferId.match(/\b\d{4}\b/);
-            if (match10) {
-                cleanedId = match10[0];
-            } else if (match4) {
-                cleanedId = match4[0];
-                isShort = true;
-            }
-
-            if (!cleanedId) {
-                showMessage('error', 'Неверный формат QR', '', '', '');
-                isProcessing = false;
-                return;
-            }
-
-            const deliveriesQuery = query(ref(database, 'deliveries'));
-            const snapshot = await get(deliveriesQuery);
-
-            let found = false;
-            let courierName = '';
-            let courierId = '';
-            let matchedDeliveries = [];
-
-            if (snapshot.exists()) {
-                snapshot.forEach(childSnapshot => {
-                    const data = childSnapshot.val();
-                    if (isShort) {
-                        if (data.id && data.id.endsWith(cleanedId)) {
-                            matchedDeliveries.push(data);
-                        }
-                    } else {
-                        if (data.id === cleanedId) {
-                            matchedDeliveries.push(data);
-                        }
-                    }
-                });
-            }
-
-            if (matchedDeliveries.length === 0) {
-                showMessage('not_found', cleanedId);
-                isProcessing = false;
-                return;
-            }
-
-            if (matchedDeliveries.length === 1) {
-                // Обычная логика для одной передачи
-                const data = matchedDeliveries[0];
-                await processDeliveryScan(data);
-                isProcessing = false;
-                return;
-            }
-
-            // Если найдено несколько — показать выбор
-            showTransferSelectModal(matchedDeliveries, async (selectedDelivery) => {
-                await processDeliveryScan(selectedDelivery);
-                isProcessing = false;
+    if (dom.bottomCouriersButton) {
+        dom.bottomCouriersButton.addEventListener('click', () => {
+            const direction = getBottomNavDirection('couriers');
+            setActiveBottomNav('couriers');
+            openCourierPage({
+                direction,
+                service,
+                ui,
             });
-        } catch (e) {
-            console.error('Ошибка поиска:', e);
-            showMessage('error', 'Ошибка при поиске', '', '', '');
-            isProcessing = false;
-        } finally {
-            if (loadingIndicator) loadingIndicator.style.display = 'none';
-            if (qrSpinner) qrSpinner.classList.remove('active');
-            showAllQrIcons();
-            isProcessing = false;
-        }
-    }
-
-    // Обработка выбранной передачи (или единственной)
-    async function processDeliveryScan(data) {
-        const cleanedId = data.id;
-        const courierName = data.courier_name;
-        // Проверяем на дубликат
-        const scansRef = ref(database, 'scans');
-        const scansQuery = query(scansRef);
-        const scansSnapshot = await get(scansQuery);
-        let duplicate = false;
-        let prevCourier = '';
-        if (scansSnapshot.exists()) {
-            scansSnapshot.forEach(scanSnap => {
-                const scan = scanSnap.val();
-                if (scan.delivery_id === cleanedId) {
-                    duplicate = true;
-                    prevCourier = scan.courier_name || '';
-                }
-            });
-        }
-        if (duplicate) {
-            showMessage('already_scanned', cleanedId, courierName, `Ранее сканировал: ${prevCourier}`);
-        } else {
-            const newScanRef = push(ref(database, 'scans'));
-            await set(newScanRef, {
-                delivery_id: cleanedId,
-                courier_name: courierName,
-                timestamp: Date.now()
-            });
-            showMessage('success', cleanedId, courierName);
-        }
-    }
-
-    // Модалка выбора передачи по 4 цифрам
-    function showTransferSelectModal(deliveries, onSelect) {
-        // Удалить старую модалку если есть
-        let selectModal = document.getElementById('transferSelectModal');
-        if (selectModal) selectModal.remove(); // <-- Исправлено: удаляем старую модалку
-        selectModal = document.createElement('div');
-        selectModal.id = 'transferSelectModal';
-        selectModal.style.position = 'fixed';
-        selectModal.style.top = '0';
-        selectModal.style.left = '0';
-        selectModal.style.width = '100vw';
-        selectModal.style.height = '100vh';
-        selectModal.style.background = 'rgba(0,0,0,0.7)';
-        selectModal.style.display = 'flex';
-        selectModal.style.alignItems = 'center';
-        selectModal.style.justifyContent = 'center';
-        selectModal.style.zIndex = '10001';
-        selectModal.addEventListener('click', () => selectModal.remove());
-
-        const modalContent = document.createElement('div');
-        modalContent.style.background = '#3f51b5';
-        modalContent.style.borderRadius = '24px';
-        modalContent.style.padding = '28px 20px';
-        modalContent.style.color = 'white';
-        modalContent.style.textAlign = 'center';
-        modalContent.style.position = 'relative';
-        modalContent.style.fontFamily = 'Inter, sans-serif';
-        modalContent.style.fontSize = '13px';
-        modalContent.style.maxHeight = '80vh';
-        modalContent.style.overflowY = 'auto';
-        modalContent.style.minWidth = '220px';
-        modalContent.style.maxWidth = '90vw';
-        modalContent.addEventListener('click', e => e.stopPropagation());
-
-        const title = document.createElement('div');
-        title.textContent = 'Выберите передачу:';
-        title.style.fontWeight = '500';
-        title.style.marginBottom = '18px';
-        modalContent.appendChild(title);
-
-        deliveries.forEach(d => {
-            const btn = document.createElement('button');
-            btn.textContent = `${d.id} (${d.courier_name || 'Без курьера'})` + (d.timestamp ? `, ${new Date(d.timestamp).toLocaleDateString('ru-RU')}` : '');
-            btn.style.display = 'block';
-            btn.style.width = '100%';
-            btn.style.margin = '8px 0';
-            btn.style.padding = '10px 0';
-            btn.style.background = '#ea1e63';
-            btn.style.color = 'white';
-            btn.style.border = 'none';
-            btn.style.borderRadius = '18px';
-            btn.style.fontSize = '13px';
-            btn.style.fontWeight = '500';
-            btn.style.fontFamily = 'Inter, sans-serif';
-            btn.style.cursor = 'pointer';
-            btn.addEventListener('click', () => {
-                selectModal.remove();
-                onSelect(d);
-            });
-            modalContent.appendChild(btn);
         });
-
-        selectModal.appendChild(modalContent);
-        document.body.appendChild(selectModal);
     }
 
-    async function loadStats() {
-        if (!statsList) return;
-        statsList.innerHTML = '';
-        console.log('Загрузка статистики...');
-        try {
-            const scansRef = ref(database, 'scans');
-            const scansQuery = query(scansRef);
-            const scansSnapshot = await get(scansQuery);
-            if (scansSnapshot.exists()) {
-                scansSnapshot.forEach(scanSnap => {
-                    const scanData = scanSnap.val();
-                    if (!scanData || !scanData.delivery_id || !scanData.courier_name || !scanData.timestamp) return;
-                    const li = document.createElement('li');
-                    let date;
-                    try {
-                        date = new Date(scanData.timestamp).toLocaleString('ru-RU');
-                    } catch (e) {
-                        date = 'неизвестно';
-                    }
-                    li.textContent = `ID: ${scanData.delivery_id}, Курьер: ${scanData.courier_name}, Время: ${date}`;
-                    statsList.appendChild(li);
-                });
-            } else {
-                const li = document.createElement('li');
-                li.textContent = 'Сканирований пока нет.';
-                statsList.appendChild(li);
-            }
-            console.log('Статистика загружена успешно.');
-        } catch (e) {
-            console.error('Ошибка загрузки статистики:', e);
-            const li = document.createElement('li');
-            li.textContent = 'Ошибка загрузки статистики.';
-            statsList.appendChild(li);
-        }
+    if (dom.bottomArchiveButton) {
+        dom.bottomArchiveButton.addEventListener('click', () => {
+            const direction = getBottomNavDirection('archive');
+            setActiveBottomNav('archive');
+            openArchivePage({
+                direction,
+                service,
+                ui,
+            });
+        });
     }
 
-    function stopQrScanner() {
-        try {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-                if (videoElement) videoElement.srcObject = null;
-            }
-            if (codeReader) codeReader.reset();
-            showAllQrIcons();
-            if (qrSpinner) qrSpinner.classList.remove('active');
-            if (loadingIndicator) loadingIndicator.style.display = 'none';
-        } catch (e) {
-            console.warn('Ошибка при остановке сканера:', e);
-        }
+    if (dom.bottomHomeButton) {
+        dom.bottomHomeButton.addEventListener('click', () => {
+            showScannerHomePage({
+                direction: getBottomNavDirection('home'),
+            });
+        });
     }
 
-    function showSuccessMessage(text) {
-        const msg = document.createElement('div');
-        msg.textContent = text;
-        msg.style.position = 'fixed';
-        msg.style.top = '24px';
-        msg.style.left = '50%';
-        msg.style.transform = 'translateX(-50%)';
-        msg.style.background = '#43ea7c';
-        msg.style.color = '#fff';
-        msg.style.fontFamily = 'Inter, sans-serif';
-        msg.style.fontSize = '15px';
-        msg.style.fontWeight = '500';
-        msg.style.padding = '14px 32px';
-        msg.style.borderRadius = '24px';
-        msg.style.boxShadow = '0 4px 24px rgba(0,0,0,0.18)';
-        msg.style.zIndex = '99999';
-        msg.style.opacity = '0';
-        msg.style.transition = 'opacity 0.3s, background 0.3s';
-        document.body.appendChild(msg);
-        setTimeout(() => { msg.style.opacity = '1'; }, 50);
-        setTimeout(() => { msg.style.opacity = '0'; }, 1200);
-        setTimeout(() => { msg.remove(); }, 1600);
+    if (dom.bottomSettingsButton) {
+        dom.bottomSettingsButton.addEventListener('click', () => {
+            openSettingsPagePanel({
+                direction: getBottomNavDirection('settings'),
+            });
+        });
     }
+
+    applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'blue');
+    setActiveBottomNav('home');
+
+    const scheduleAdminWarmup =
+        window.requestIdleCallback
+            ? (callback) => window.requestIdleCallback(callback, { timeout: 1200 })
+            : (callback) => window.setTimeout(callback, 250);
+
+    scheduleAdminWarmup(() => {
+        void service.warmAdminData?.();
+    });
 });

@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR Scanner</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
     <script type="module" src="main.js"></script>
     <script type="module" src="firebase.js"></script>
     <style>
@@ -15,13 +15,13 @@
             left: 0;
             top: 48px;
             min-width: 140px;
-            background: #3f51b5;
-            color: #fff;
+            background: var(--color-surface-strong);
+            color: var(--color-text-primary);
             border: none;
             border-radius: 12px;
             font-size: 15px;
             font-family: 'Inter', sans-serif;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            box-shadow: var(--shadow-soft);
             padding: 10px 16px;
             z-index: 1001;
             outline: none;
@@ -31,8 +31,8 @@
             -moz-appearance: none;
         }
         #cameraSelect option {
-            background: #3949ab;
-            color: #fff;
+            background: var(--color-screen-bg);
+            color: var(--color-text-primary);
             border-radius: 8px;
             padding: 8px 12px;
             font-size: 15px;
@@ -42,31 +42,7 @@
 </head>
 <body>
     <div id="cameraSelectorContainer" style="position:absolute;top:16px;left:16px;z-index:1000;display:flex;align-items:center;gap:8px;">
-        <button id="cameraIconButton" style="background:none;border:none;padding:0;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
-                <rect x="3" y="7" width="18" height="12" rx="3" fill="none" stroke="#fff" stroke-width="1.5"/>
-                <circle cx="12" cy="13" r="3.5" fill="none" stroke="#fff" stroke-width="1.5"/>
-                <rect x="8" y="4" width="8" height="3" rx="1.5" fill="none" stroke="#fff" stroke-width="1.5"/>
-            </svg>
-        </button>
-        <select id="cameraSelect" style="
-            display:none;
-            position:absolute;
-            left:0;
-            top:48px;
-            min-width:120px;
-            background:#3f51b5;
-            color:#fff;
-            border:none;
-            border-radius:8px;
-            font-size:15px;
-            font-family:'Inter',sans-serif;
-            box-shadow:0 2px 8px rgba(0,0,0,0.12);
-            padding:8px 12px;
-            z-index:1001;
-            outline:none;
-            cursor:pointer;
-        "></select>
+        <select id="cameraSelect"></select>
     </div>
     <input type="checkbox" id="sidebarToggle" hidden />
     <label class="sidebarIconToggle" for="sidebarToggle" style="position:absolute;top:16px;right:16px;height:44px;display:flex;align-items:center;cursor:pointer;z-index:1000;">
@@ -74,21 +50,31 @@
         <div class="horizontal"></div>
         <div class="diagonal part-2"></div>
     </label>
-    <nav id="sidebarMenu">
+    <nav id="sidebarMenu" aria-hidden="true">
       <form id="sidebarDataForm" style="width:100%;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
         <input type="text" id="sidebarDataInput" placeholder="Введите данные" style="width:100%;padding:8px 10px;border: radius 30px;border:none;font-size:13px;font-family:'Inter',sans-serif;outline:none;box-sizing:border-box;">
-        <button type="submit" style="width:100%;background:#ea1e63;color:white;border:none;padding:8px 0;border-radius:30px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Сохранить</button>
+        <button type="submit" style="width:100%;background:var(--color-primary);color:var(--color-primary-text);border:none;padding:8px 0;border-radius:30px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Сохранить</button>
       </form>
       <button id="sidebarShowStatsButton" style="width:100%;margin-top:12px;background:none;border:none;color:white;padding:10px 0;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;text-align:right;border-radius:6px;transition:background 0.2s;">Показать статистику</button>
     </nav>
     <div class="page">
-        <div class="button-group">
-            <button id="inputModeButton" class="button-group-item">ID передачи</button>
+        <div id="inputModeButton" class="input-group manual-entry-group">
+            <input
+                id="manualTransferId"
+                class="input manual-entry-input"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder=" "
+            >
+            <button id="manualSubmitButton" class="manual-entry-submit" type="button" aria-label="Отправить ID" title="Отправить ID">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M13 6L19 12L13 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            <label class="user-label" for="manualTransferId">ID &#1055;&#1077;&#1088;&#1077;&#1076;&#1072;&#1095;&#1080;</label>
             <div id="qr-result-overlay"></div>
-            <div id="manualInputContainer" class="button-group">
-                <input type="text" id="manualTransferId" placeholder="Введите ID">
-                <button id="manualSubmitButton" class="button-group-item">Отправить</button>
-            </div>
         </div>
 
         <div class="qr-container">
@@ -113,11 +99,98 @@
             <div id="resultRawData" class="raw-data"></div>
         </div>
 
-        <button id="scanButton" class="scan-button">Сканировать QR код</button>
+        <button id="scanButton" class="scan-button" type="button">
+            <span class="scan-button-track" aria-hidden="true">
+                <span class="scan-button-swipe-icon scan-button-swipe-icon-left">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="7" width="18" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <rect x="8" y="4" width="8" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M5 19L19 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span class="scan-button-swipe-icon scan-button-swipe-icon-right">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="7" width="18" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <rect x="8" y="4" width="8" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M5 19L19 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                </span>
+            </span>
+            <span class="scan-button-fill">
+                <span class="scan-button-label">Сканировать QR код</span>
+            </span>
+        </button>
         <div class="info-text">Сканируйте QR передачи или введите ID вручную</div>
+        <div class="scan-swipe-note">Свайп по кнопке выключает камеру</div>
 
         <!-- Раздел удаления данных -->
     <!-- Кнопка удаления курьера теперь в модальном окне архива -->
     </div>
+    <nav class="bottom-nav" aria-label="Основная навигация">
+        <button id="bottomDataButton" class="bottom-nav-button" type="button">
+            <span class="bottom-nav-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="5" y="3.5" width="14" height="17" rx="2.5" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M9 8.5H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M9 12H15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M9 15.5H13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+            </span>
+            <span class="bottom-nav-label">Данные</span>
+        </button>
+        <button id="bottomCouriersButton" class="bottom-nav-button" type="button">
+            <span class="bottom-nav-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8 11C9.65685 11 11 9.65685 11 8C11 6.34315 9.65685 5 8 5C6.34315 5 5 6.34315 5 8C5 9.65685 6.34315 11 8 11Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M16.5 10C17.8807 10 19 8.88071 19 7.5C19 6.11929 17.8807 5 16.5 5C15.1193 5 14 6.11929 14 7.5C14 8.88071 15.1193 10 16.5 10Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M3.5 18C3.5 15.7909 5.29086 14 7.5 14H8.5C10.7091 14 12.5 15.7909 12.5 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M13.5 18C13.5 16.067 15.067 14.5 17 14.5H17.5C19.433 14.5 21 16.067 21 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+            </span>
+            <span class="bottom-nav-label">Курьеры</span>
+        </button>
+        <button id="bottomHomeButton" class="bottom-nav-button" type="button">
+            <span class="bottom-nav-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 12H12V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3 12H3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M8 17H8.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M12 21H12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M21 12H21.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M3 17H4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M15.5 12H17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M3 21H8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M12 2V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M17.6 21H19.4C19.96 21 20.24 21 20.454 20.891C20.6422 20.7951 20.7951 20.6422 20.891 20.454C21 20.2401 21 19.96 21 19.4V17.6C21 17.04 21 16.7599 20.891 16.546C20.7951 16.3578 20.6422 16.2049 20.454 16.109C20.2401 16 19.96 16 19.4 16H17.6C17.04 16 16.7599 16 16.546 16.109C16.3578 16.2049 16.2049 16.3578 16.109 16.546C16 16.7599 16 17.04 16 17.6V19.4C16 19.96 16 20.2401 16.109 20.454C16.2049 20.6422 16.3578 20.7951 16.546 20.891C16.7599 21 17.04 21 17.6 21Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M17.6 8H19.4C19.96 8 20.2401 8 20.454 7.89101C20.6422 7.79513 20.7951 7.64215 20.891 7.45399C21 7.24008 21 6.96005 21 6.4V4.6C21 4.03995 21 3.75992 20.891 3.54601C20.7951 3.35785 20.6422 3.20487 20.454 3.10899C20.2401 3 19.9601 3 19.4 3H17.6C17.0399 3 16.7599 3 16.546 3.10899C16.3578 3.20487 16.2049 3.35785 16.109 3.54601C16 3.75992 16 4.03995 16 4.6V6.4C16 6.96005 16 7.24008 16.109 7.45399C16.2049 7.64215 16.3578 7.79513 16.546 7.89101C16.7599 8 17.0399 8 17.6 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M4.6 8H6.4C6.96005 8 7.24008 8 7.45399 7.89101C7.64215 7.79513 7.79513 7.64215 7.89101 7.45399C8 7.24008 8 6.96005 8 6.4V4.6C8 4.03995 8 3.75992 7.89101 3.54601C7.79513 3.35785 7.64215 3.20487 7.45399 3.10899C7.24008 3 6.96005 3 6.4 3H4.6C4.03995 3 3.75992 3 3.54601 3.10899C3.35785 3.20487 3.20487 3.35785 3.10899 3.54601C3 3.75992 3 4.03995 3 4.6V6.4C3 6.96005 3 7.24008 3.10899 7.45399C3.20487 7.64215 3.35785 7.79513 3.54601 7.89101C3.75992 8 4.03995 8 4.6 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+            </span>
+            <span class="bottom-nav-label">QR</span>
+        </button>
+        <button id="bottomArchiveButton" class="bottom-nav-button" type="button">
+            <span class="bottom-nav-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="6" y="7" width="12" height="12" rx="2.2" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M4 7H20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <rect x="9" y="3.8" width="6" height="2.2" rx="1.1" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M10 10V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M14 10V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+            </span>
+            <span class="bottom-nav-label">Удаление</span>
+        </button>
+        <button id="bottomSettingsButton" class="bottom-nav-button" type="button">
+            <span class="bottom-nav-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 8.75C10.2051 8.75 8.75 10.2051 8.75 12C8.75 13.7949 10.2051 15.25 12 15.25C13.7949 15.25 15.25 13.7949 15.25 12C15.25 10.2051 13.7949 8.75 12 8.75Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M19 12C19 11.5498 18.9639 11.108 18.8945 10.6777L20.5 9.42871L18.5713 6.08301L16.6328 6.75293C15.9586 6.22377 15.1927 5.80739 14.3682 5.53125L14.0625 3.5H9.9375L9.63184 5.53125C8.80734 5.80739 8.04143 6.22377 7.36719 6.75293L5.42871 6.08301L3.5 9.42871L5.10547 10.6777C5.03614 11.108 5 11.5498 5 12C5 12.4502 5.03614 12.892 5.10547 13.3223L3.5 14.5713L5.42871 17.917L7.36719 17.2471C8.04143 17.7762 8.80734 18.1926 9.63184 18.4688L9.9375 20.5H14.0625L14.3682 18.4688C15.1927 18.1926 15.9586 17.7762 16.6328 17.2471L18.5713 17.917L20.5 14.5713L18.8945 13.3223C18.9639 12.892 19 12.4502 19 12Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                </svg>
+            </span>
+            <span class="bottom-nav-label">Настройки</span>
+        </button>
+    </nav>
 </body>
 </html>
