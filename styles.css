@@ -1892,6 +1892,103 @@ input[type="date"]:focus {
     display: block;
 }
 
+.camera-picker-modal-content {
+    max-height: 80vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    animation: modal-pop-in var(--ui-duration-base) var(--ui-ease-standard);
+}
+
+.camera-picker-modal-description {
+    margin-bottom: 16px;
+    color: var(--color-text-secondary);
+    font: 500 12px 'Inter', sans-serif;
+    text-align: center;
+}
+
+.camera-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.camera-picker-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border: none;
+    border-radius: 22px;
+    padding: 15px 16px;
+    background: var(--color-surface-soft);
+    color: var(--color-text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color var(--ui-duration-fast) var(--ui-ease-soft),
+        color var(--ui-duration-fast) var(--ui-ease-soft),
+        transform var(--ui-duration-fast) var(--ui-ease-standard),
+        box-shadow var(--ui-duration-fast) var(--ui-ease-soft);
+}
+
+.camera-picker-option:active {
+    transform: translateY(1px) scale(0.99);
+}
+
+.camera-picker-option.is-selected {
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    box-shadow: var(--shadow-soft);
+}
+
+.camera-picker-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.camera-picker-option-title {
+    font: 600 14px 'Inter', sans-serif;
+    line-height: 1.2;
+}
+
+.camera-picker-option-meta {
+    color: var(--color-text-secondary);
+    font: 500 11px 'Inter', sans-serif;
+    line-height: 1.25;
+    opacity: 0.92;
+    word-break: break-word;
+}
+
+.camera-picker-option.is-selected .camera-picker-option-meta {
+    color: inherit;
+    opacity: 0.82;
+}
+
+.camera-picker-option-indicator {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid currentColor;
+    opacity: 0.3;
+    position: relative;
+}
+
+.camera-picker-option.is-selected .camera-picker-option-indicator {
+    opacity: 1;
+}
+
+.camera-picker-option.is-selected .camera-picker-option-indicator::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
 .scan-button:hover,
 #sidebarMenu form button[type="submit"]:hover,
 #sidebarShowStatsButton:hover,

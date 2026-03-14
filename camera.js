@@ -338,8 +338,9 @@ export function createCameraController({ state, dom, ui }) {
                 dom.cameraSelect.value = state.selectedCameraId;
             }
 
-            dom.cameraSelect.style.display =
-                state.availableCameras.length > 0 ? 'inline-block' : 'none';
+            if (state.availableCameras.length === 0) {
+                dom.cameraSelect.style.display = 'none';
+            }
 
             return state.availableCameras;
         } catch (error) {
@@ -401,22 +402,6 @@ export function createCameraController({ state, dom, ui }) {
         });
 
         return camera ? camera.deviceId : null;
-    }
-
-    function showCameraInitNoticeOnce() {
-        if (state.cameraMessages.requestShown) {
-            return;
-        }
-
-        state.cameraMessages.requestShown = true;
-    }
-
-    function showCameraGrantedNoticeOnce() {
-        if (state.cameraMessages.grantedShown) {
-            return;
-        }
-
-        state.cameraMessages.grantedShown = true;
     }
 
     function clearVideoStream() {
@@ -587,8 +572,6 @@ export function createCameraController({ state, dom, ui }) {
         let cameraIdToUse = cameraIdOverride || state.selectedCameraId || null;
 
         try {
-            showCameraInitNoticeOnce();
-
             if (isIOS()) {
                 state.stream = await requestCameraStream(null);
                 debugCamera('get_user_media_success', {
@@ -629,8 +612,6 @@ export function createCameraController({ state, dom, ui }) {
                 clearVideoStream();
                 return;
             }
-
-            showCameraGrantedNoticeOnce();
 
             dom.videoElement.setAttribute('playsinline', 'true');
             dom.videoElement.setAttribute('autoplay', 'true');

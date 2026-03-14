@@ -517,7 +517,6 @@ async function appendArchiveControls({ container, service, ui }) {
                 confirmDialog.confirmButton.textContent = 'Готово!';
                 window.setTimeout(() => {
                     confirmDialog.close();
-                    ui.showToast('Все данные удалены!');
                 }, 1200);
             });
 
@@ -538,7 +537,6 @@ async function appendArchiveControls({ container, service, ui }) {
             confirmDialog.confirmButton.textContent = 'Готово!';
             window.setTimeout(() => {
                 confirmDialog.close();
-                ui.showToast(`Курьер "${selectedCourier}" удален!`);
             }, 1200);
         });
     });
@@ -565,7 +563,6 @@ async function appendArchiveControls({ container, service, ui }) {
             confirmDialog.confirmButton.textContent = 'Готово!';
             window.setTimeout(() => {
                 confirmDialog.close();
-                ui.showToast(`Передачи курьера "${selectedCourier}" удалены!`);
             }, 1200);
         });
     });

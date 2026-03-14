@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dark: '#141414',
     };
     let cameraMenuVisible = false;
+    let activeCameraPickerModal = null;
     let activeBottomNavKey = 'home';
     const bottomNavOrder = ['data', 'couriers', 'home', 'archive', 'settings'];
     const cameraSelectHomeParent = dom.cameraSelect?.parentElement || null;
@@ -659,12 +660,160 @@ document.addEventListener('DOMContentLoaded', () => {
                 dom.cameraSelect.style.maxWidth = '';
             }
             dom.cameraSelect.style.display = 'inline-block';
-            dom.cameraSelect.focus();
+            if (typeof dom.cameraSelect.showPicker === 'function') {
+                window.setTimeout(() => {
+                    if (cameraMenuVisible) {
+                        dom.cameraSelect.showPicker();
+                    }
+                }, 0);
+            }
             cameraMenuVisible = true;
             return;
         }
 
         hideCameraMenu();
+    }
+
+    function closeCameraPickerModal() {
+        if (!activeCameraPickerModal) {
+            return;
+        }
+
+        activeCameraPickerModal.close();
+        activeCameraPickerModal = null;
+    }
+
+    function getCameraPresentation(cameraItem, index, typeCounters) {
+        const rawLabel = String(cameraItem?.label || '').trim();
+        const normalizedLabel = rawLabel.toLowerCase();
+        let kind = 'default';
+        let title = `Камера ${index + 1}`;
+
+        if (/front|user/.test(normalizedLabel)) {
+            kind = 'front';
+            title = 'Фронтальная камера';
+        } else if (/ultra/.test(normalizedLabel)) {
+            kind = 'ultra';
+            title = 'Ультраширокая камера';
+        } else if (/wide/.test(normalizedLabel)) {
+            kind = 'wide';
+            title = 'Широкоугольная камера';
+        } else if (/macro/.test(normalizedLabel)) {
+            kind = 'macro';
+            title = 'Макро камера';
+        } else if (/back|rear|environment/.test(normalizedLabel)) {
+            kind = 'back';
+            title = 'Основная камера';
+        }
+
+        typeCounters[kind] = (typeCounters[kind] || 0) + 1;
+        if (typeCounters[kind] > 1) {
+            title = `${title} ${typeCounters[kind]}`;
+        }
+
+        const meta = rawLabel
+            ? rawLabel
+                  .replace(/facing back/gi, 'основная')
+                  .replace(/facing front/gi, 'фронтальная')
+                  .replace(/camera/gi, 'камера')
+            : `Устройство ${index + 1}`;
+
+        return {
+            meta,
+            title,
+        };
+    }
+
+    async function openCameraPickerModal() {
+        const cameras = await camera.updateCameraList();
+
+        if (!Array.isArray(cameras) || cameras.length === 0) {
+            ui.showScanResult('error', 'Камеры не найдены', '', '', '');
+            return;
+        }
+
+        closeCameraPickerModal();
+        hideCameraMenu();
+
+        const modal = ui.createModal({
+            modalId: 'cameraPickerModal',
+            className: 'camera-picker-modal-content',
+            maxButtonWidth: 420,
+        });
+        const baseClose = modal.close;
+        modal.close = (...args) => {
+            if (activeCameraPickerModal === modal) {
+                activeCameraPickerModal = null;
+            }
+
+            return baseClose(...args);
+        };
+        activeCameraPickerModal = modal;
+        modal.backdrop._cleanupModal = modal.close;
+
+        const title = document.createElement('div');
+        title.className = 'data-entry-modal-title';
+        title.textContent = 'Выбор камеры';
+
+        const description = document.createElement('div');
+        description.className = 'camera-picker-modal-description';
+        description.textContent = 'Выберите камеру для сканирования';
+
+        const list = document.createElement('div');
+        list.className = 'camera-picker-list';
+
+        const typeCounters = {};
+
+        cameras.forEach((cameraItem, index) => {
+            const option = document.createElement('button');
+            const presentation = getCameraPresentation(
+                cameraItem,
+                index,
+                typeCounters,
+            );
+
+            option.type = 'button';
+            option.className = 'camera-picker-option';
+            option.classList.toggle(
+                'is-selected',
+                cameraItem.deviceId === state.selectedCameraId,
+            );
+
+            const textWrap = document.createElement('span');
+            textWrap.className = 'camera-picker-option-text';
+
+            const titleText = document.createElement('span');
+            titleText.className = 'camera-picker-option-title';
+            titleText.textContent = presentation.title;
+
+            const metaText = document.createElement('span');
+            metaText.className = 'camera-picker-option-meta';
+            metaText.textContent = presentation.meta;
+
+            const indicator = document.createElement('span');
+            indicator.className = 'camera-picker-option-indicator';
+            indicator.setAttribute('aria-hidden', 'true');
+
+            textWrap.appendChild(titleText);
+            textWrap.appendChild(metaText);
+            option.appendChild(textWrap);
+            option.appendChild(indicator);
+
+            option.addEventListener('click', async () => {
+                closeCameraPickerModal();
+                await camera.handleCameraSelection(cameraItem.deviceId, {
+                    restartIfActive:
+                        state.activeRootScreen === 'home' && state.scannerActive,
+                    source: state.activeRootScreen,
+                });
+            });
+
+            list.appendChild(option);
+        });
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(description);
+        modal.content.appendChild(list);
     }
 
     function openSettingsModal() {
@@ -684,7 +833,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cameraButton.addEventListener('click', async () => {
             modal.close();
-            await toggleCameraMenu();
+            await openCameraPickerModal();
         });
 
         modal.content.appendChild(title);
@@ -844,7 +993,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
 
         cameraButton.addEventListener('click', async () => {
-            await toggleCameraMenu(cameraButton);
+            await openCameraPickerModal();
         });
 
         card.appendChild(themeButton);
@@ -866,6 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.setQrViewportState(state.scannerActive ? 'scanning' : 'idle');
 
         hideCameraMenu();
+        closeCameraPickerModal();
     }
 
     function showScannerHome() {
@@ -891,6 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.setQrViewportState(state.scannerActive ? 'scanning' : 'idle');
 
         hideCameraMenu();
+        closeCameraPickerModal();
     }
 
     if (dom.cameraSelect) {
