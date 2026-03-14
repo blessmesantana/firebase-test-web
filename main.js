@@ -106,11 +106,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const THEMES = ['blue', 'dark'];
+    const THEME_BROWSER_COLORS = {
+        blue: '#3949AB',
+        dark: '#141414',
+    };
     let cameraMenuVisible = false;
     let activeBottomNavKey = 'home';
     const bottomNavOrder = ['data', 'couriers', 'home', 'archive', 'settings'];
     const cameraSelectHomeParent = dom.cameraSelect?.parentElement || null;
     const cameraSelectHomeNextSibling = dom.cameraSelect?.nextSibling || null;
+
+    function syncBrowserThemeColor(themeName) {
+        const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if (!themeColorMeta) {
+            return;
+        }
+
+        themeColorMeta.setAttribute(
+            'content',
+            THEME_BROWSER_COLORS[themeName] || THEME_BROWSER_COLORS.blue,
+        );
+    }
 
     function restoreCameraSelectToHomeHost() {
         if (!dom.cameraSelect || !cameraSelectHomeParent) {
@@ -133,6 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const resolvedTheme = THEMES.includes(themeName) ? themeName : 'blue';
         document.body.dataset.theme = resolvedTheme;
         localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
+        syncBrowserThemeColor(resolvedTheme);
         return resolvedTheme;
     }
 
@@ -713,11 +730,6 @@ document.addEventListener('DOMContentLoaded', () => {
         page.body.appendChild(textarea);
         page.body.appendChild(submitButton);
 
-        window.setTimeout(() => {
-            if (document.body.contains(textarea)) {
-                textarea.focus();
-            }
-        }, 360);
     }
 
     function openSettingsPagePanel(options = {}) {
