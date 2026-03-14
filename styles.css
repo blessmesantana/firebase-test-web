@@ -153,6 +153,13 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn {
         0 0 10px rgba(200, 240, 255, 0.4) inset;
 }
 
+body[data-theme='dark'] .archive-action-group > button {
+    box-shadow:
+        0 0 10px rgba(160, 216, 255, 0.42),
+        0 0 20px rgba(160, 216, 255, 0.16),
+        0 0 10px rgba(200, 240, 255, 0.36) inset;
+}
+
 body[data-theme='dark'] .data-entry-submit-button:hover,
 body[data-theme='dark'] #sidebarMenu form button[type="submit"]:hover,
 body[data-theme='dark'] .archive-action-group > button:hover,
@@ -164,6 +171,13 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
         0 0 16px rgba(160, 216, 255, 0.54),
         0 0 34px rgba(160, 216, 255, 0.26),
         0 0 10px rgba(200, 240, 255, 0.48) inset;
+}
+
+body[data-theme='dark'] .archive-action-group > button:hover {
+    box-shadow:
+        0 0 12px rgba(160, 216, 255, 0.5),
+        0 0 24px rgba(160, 216, 255, 0.18),
+        0 0 10px rgba(200, 240, 255, 0.42) inset;
 }
 
 .page {
@@ -539,8 +553,8 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
 
 .archive-screen .archive-action-group {
     margin-top: auto;
-    padding-top: 8px;
-    padding-bottom: 12px;
+    padding-top: 10px;
+    padding-bottom: 18px;
 }
 
 .archive-action-group > button {

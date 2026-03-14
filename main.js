@@ -165,6 +165,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return targetIndex > currentIndex ? 'forward' : 'backward';
     }
 
+    function isBottomNavTargetActive(targetKey) {
+        return activeBottomNavKey === targetKey;
+    }
+
     function setActiveBottomNav(activeKey) {
         const entries = {
             archive: dom.bottomArchiveButton,
@@ -1204,6 +1208,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.bottomDataButton) {
         dom.bottomDataButton.addEventListener('click', () => {
+            if (isBottomNavTargetActive('data')) {
+                return;
+            }
+
             openDataEntryPagePanel({
                 direction: getBottomNavDirection('data'),
             });
@@ -1212,6 +1220,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.bottomCouriersButton) {
         dom.bottomCouriersButton.addEventListener('click', () => {
+            if (isBottomNavTargetActive('couriers')) {
+                return;
+            }
+
             const direction = getBottomNavDirection('couriers');
             setActiveBottomNav('couriers');
             openCourierPage({
@@ -1224,6 +1236,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.bottomArchiveButton) {
         dom.bottomArchiveButton.addEventListener('click', () => {
+            if (isBottomNavTargetActive('archive')) {
+                return;
+            }
+
             const direction = getBottomNavDirection('archive');
             setActiveBottomNav('archive');
             openArchivePage({
@@ -1236,6 +1252,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.bottomHomeButton) {
         dom.bottomHomeButton.addEventListener('click', () => {
+            if (isBottomNavTargetActive('home')) {
+                return;
+            }
+
             showScannerHomePage({
                 direction: getBottomNavDirection('home'),
             });
@@ -1244,6 +1264,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.bottomSettingsButton) {
         dom.bottomSettingsButton.addEventListener('click', () => {
+            if (isBottomNavTargetActive('settings')) {
+                return;
+            }
+
             openSettingsPagePanel({
                 direction: getBottomNavDirection('settings'),
             });

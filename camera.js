@@ -12,6 +12,8 @@ function getZxingReader() {
 
 export function createCameraController({ state, dom, ui }) {
     const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
+    const IOS_FRONT_CAMERA_ID = '__ios_front_camera__';
+    const IOS_BACK_CAMERA_ID = '__ios_back_camera__';
     let scanResultHandler = null;
 
     function debugCamera(event, payload = {}) {
@@ -72,6 +74,30 @@ export function createCameraController({ state, dom, ui }) {
             previousSelectedCameraId: state.selectedCameraId,
         });
         syncSelectedCamera(null);
+    }
+
+    function isIosVirtualCameraId(cameraId) {
+        return cameraId === IOS_FRONT_CAMERA_ID || cameraId === IOS_BACK_CAMERA_ID;
+    }
+
+    function buildIosVirtualCameras(existingCameras = []) {
+        const frontCamera = existingCameras.find((camera) =>
+            /front|user/i.test(camera.label || ''),
+        );
+        const backCamera = existingCameras.find((camera) =>
+            /back|rear|environment/i.test(camera.label || ''),
+        );
+
+        return [
+            {
+                deviceId: IOS_BACK_CAMERA_ID,
+                label: backCamera?.label || 'camera facing back',
+            },
+            {
+                deviceId: IOS_FRONT_CAMERA_ID,
+                label: frontCamera?.label || 'camera facing front',
+            },
+        ];
     }
 
     function ensurePauseState() {
@@ -167,6 +193,10 @@ export function createCameraController({ state, dom, ui }) {
 
         let cameras = await readVideoInputs();
 
+        if (isIOS() && cameras.length <= 1) {
+            return buildIosVirtualCameras(cameras);
+        }
+
         if (cameras.length > 0) {
             return cameras;
         }
@@ -196,6 +226,10 @@ export function createCameraController({ state, dom, ui }) {
             console.warn('Не удалось обновить список камер после прогрева:', error);
         }
 
+        if (isIOS()) {
+            return buildIosVirtualCameras(cameras);
+        }
+
         return cameras;
     }
 
@@ -210,7 +244,17 @@ export function createCameraController({ state, dom, ui }) {
         };
 
         if (isIOS()) {
-            return navigator.mediaDevices.getUserMedia(fallbackConstraints);
+            const facingMode =
+                cameraIdToUse === IOS_FRONT_CAMERA_ID ? 'user' : 'environment';
+
+            return navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: facingMode },
+                    width: { ideal: 480, max: 480 },
+                    height: { ideal: 480, max: 480 },
+                    aspectRatio: 1,
+                },
+            });
         }
 
         if (cameraIdToUse) {
@@ -355,6 +399,18 @@ export function createCameraController({ state, dom, ui }) {
             state.availableCameras.length > 0
                 ? state.availableCameras
                 : await updateCameraList();
+
+        if (isIOS()) {
+            if (
+                preferredCameraId &&
+                cameras.some((camera) => camera.deviceId === preferredCameraId)
+            ) {
+                return preferredCameraId;
+            }
+
+            return cameras.find((camera) => camera.deviceId === IOS_BACK_CAMERA_ID)
+                ?.deviceId || cameras[0]?.deviceId || null;
+        }
 
         if (preferredCameraId) {
             const preferredCamera = cameras.find(
@@ -573,10 +629,17 @@ export function createCameraController({ state, dom, ui }) {
 
         try {
             if (isIOS()) {
-                state.stream = await requestCameraStream(null);
+                cameraIdToUse = await pickCameraId(cameraIdToUse);
+
+                if (cameraIdToUse) {
+                    syncSelectedCamera(cameraIdToUse);
+                }
+
+                state.stream = await requestCameraStream(cameraIdToUse);
                 debugCamera('get_user_media_success', {
                     platform: 'ios',
                     selectedCameraId: state.selectedCameraId,
+                    requestedCameraId: cameraIdToUse,
                 });
             } else {
                 cameraIdToUse = await pickCameraId(cameraIdToUse);
