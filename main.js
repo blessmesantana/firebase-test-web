@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inputModeButton: document.getElementById('inputModeButton'),
         loadingIndicator: document.getElementById('loadingIndicator'),
         manualInputContainer: document.getElementById('manualInputContainer'),
+        manualTransferForm: document.getElementById('manualTransferForm'),
         manualSubmitButton: document.getElementById('manualSubmitButton'),
         manualTransferIdInput: document.getElementById('manualTransferId'),
         qrContainer: document.querySelector('.qr-container'),
@@ -79,6 +80,8 @@ document.addEventListener('DOMContentLoaded', () => {
         scannerPhase: 'idle',
         scannerStarting: false,
         selectedCameraId: localStorage.getItem('selectedCameraId') || null,
+        selectedCameraSignature:
+            localStorage.getItem('selectedCameraSignature') || null,
         stopReason: null,
         stream: null,
     };
@@ -441,18 +444,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.showScanResult('error', 'Неверный формат ID', '', '', '');
     }
 
-    if (dom.manualSubmitButton) {
-        dom.manualSubmitButton.addEventListener('click', () => {
+    if (dom.manualTransferForm) {
+        dom.manualTransferForm.addEventListener('submit', (event) => {
+            event.preventDefault();
             void submitManualTransferId();
-        });
-    }
-
-    if (dom.manualTransferIdInput) {
-        dom.manualTransferIdInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                void submitManualTransferId();
-            }
         });
     }
 

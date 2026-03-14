@@ -77,16 +77,17 @@
       <button id="sidebarShowStatsButton" style="width:100%;margin-top:12px;background:none;border:none;color:white;padding:10px 0;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;text-align:right;border-radius:6px;transition:background 0.2s;">Показать статистику</button>
     </nav>
     <div class="page">
-        <div id="inputModeButton" class="input-group manual-entry-group">
+        <form id="manualTransferForm" class="input-group manual-entry-group">
             <input
                 id="manualTransferId"
                 class="input manual-entry-input"
                 type="text"
                 inputmode="numeric"
+                enterkeyhint="go"
                 autocomplete="off"
                 placeholder=" "
             >
-            <button id="manualSubmitButton" class="manual-entry-submit" type="button" aria-label="Отправить ID" title="Отправить ID">
+            <button id="manualSubmitButton" class="manual-entry-submit" type="submit" aria-label="Отправить ID" title="Отправить ID">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     <path d="M13 6L19 12L13 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -94,7 +95,7 @@
             </button>
             <label class="user-label" for="manualTransferId">ID &#1055;&#1077;&#1088;&#1077;&#1076;&#1072;&#1095;&#1080;</label>
             <div id="qr-result-overlay"></div>
-        </div>
+        </form>
 
         <div class="qr-container">
             <video id="qr-video"></video>

@@ -12,6 +12,8 @@ function getZxingReader() {
 
 export function createCameraController({ state, dom, ui }) {
     const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
+    const CAMERA_ID_STORAGE_KEY = 'selectedCameraId';
+    const CAMERA_SIGNATURE_STORAGE_KEY = 'selectedCameraSignature';
     const IOS_FRONT_CAMERA_ID = '__ios_front_camera__';
     const IOS_BACK_CAMERA_ID = '__ios_back_camera__';
     let scanResultHandler = null;
@@ -56,13 +58,134 @@ export function createCameraController({ state, dom, ui }) {
         dom.cameraSelect.value = hasOption ? cameraId : '';
     }
 
-    function syncSelectedCamera(cameraId) {
+    function normalizeCameraLabel(label = '') {
+        return String(label)
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+    }
+
+    function getCameraFacingKey(label = '') {
+        const normalizedLabel = normalizeCameraLabel(label);
+
+        if (/front|user/.test(normalizedLabel)) {
+            return 'front';
+        }
+
+        if (/ultra/.test(normalizedLabel)) {
+            return 'ultra';
+        }
+
+        if (/wide/.test(normalizedLabel)) {
+            return 'wide';
+        }
+
+        if (/macro/.test(normalizedLabel)) {
+            return 'macro';
+        }
+
+        if (/tele/.test(normalizedLabel)) {
+            return 'tele';
+        }
+
+        if (/back|rear|environment/.test(normalizedLabel)) {
+            return 'back';
+        }
+
+        return 'unknown';
+    }
+
+    function getCameraSignature(camera) {
+        if (!camera) {
+            return '';
+        }
+
+        if (isIosVirtualCameraId(camera.deviceId)) {
+            return camera.deviceId;
+        }
+
+        const normalizedLabel = normalizeCameraLabel(camera.label);
+
+        if (!normalizedLabel) {
+            return '';
+        }
+
+        return `${getCameraFacingKey(normalizedLabel)}|${normalizedLabel}`;
+    }
+
+    function getStoredCameraSignature() {
+        return state.selectedCameraSignature
+            || localStorage.getItem(CAMERA_SIGNATURE_STORAGE_KEY)
+            || null;
+    }
+
+    function resolveStoredCameraId(cameras, preferredCameraId = null) {
+        if (!Array.isArray(cameras) || cameras.length === 0) {
+            return null;
+        }
+
+        if (
+            preferredCameraId &&
+            cameras.some((camera) => camera.deviceId === preferredCameraId)
+        ) {
+            return preferredCameraId;
+        }
+
+        const storedSignature = getStoredCameraSignature();
+
+        if (!storedSignature) {
+            return null;
+        }
+
+        const exactSignatureMatch = cameras.find(
+            (camera) => getCameraSignature(camera) === storedSignature,
+        );
+
+        if (exactSignatureMatch) {
+            return exactSignatureMatch.deviceId;
+        }
+
+        const [storedFacingKey] = storedSignature.split('|');
+
+        if (!storedFacingKey || storedFacingKey === 'unknown') {
+            return null;
+        }
+
+        return cameras.find(
+            (camera) => getCameraFacingKey(camera.label) === storedFacingKey,
+        )?.deviceId || null;
+    }
+
+    function syncSelectedCamera(cameraId, options = {}) {
         state.selectedCameraId = cameraId || null;
+        const matchedCamera =
+            options.camera
+            || state.availableCameras.find(
+                (camera) => camera.deviceId === state.selectedCameraId,
+            )
+            || null;
+        const nextSignature = options.signature !== undefined
+            ? options.signature
+            : matchedCamera
+              ? getCameraSignature(matchedCamera)
+              : isIosVirtualCameraId(state.selectedCameraId)
+                ? state.selectedCameraId
+                : state.selectedCameraSignature;
+        state.selectedCameraSignature = nextSignature || null;
 
         if (state.selectedCameraId) {
-            localStorage.setItem('selectedCameraId', state.selectedCameraId);
+            localStorage.setItem(CAMERA_ID_STORAGE_KEY, state.selectedCameraId);
         } else {
-            localStorage.removeItem('selectedCameraId');
+            localStorage.removeItem(CAMERA_ID_STORAGE_KEY);
+        }
+
+        if (state.selectedCameraSignature) {
+            localStorage.setItem(
+                CAMERA_SIGNATURE_STORAGE_KEY,
+                state.selectedCameraSignature,
+            );
+        } else {
+            localStorage.removeItem(CAMERA_SIGNATURE_STORAGE_KEY);
         }
 
         syncCameraSelectValue(state.selectedCameraId);
@@ -73,7 +196,7 @@ export function createCameraController({ state, dom, ui }) {
             reason,
             previousSelectedCameraId: state.selectedCameraId,
         });
-        syncSelectedCamera(null);
+        syncSelectedCamera(null, { signature: null });
     }
 
     function isIosVirtualCameraId(cameraId) {
@@ -380,6 +503,20 @@ export function createCameraController({ state, dom, ui }) {
                 )
             ) {
                 dom.cameraSelect.value = state.selectedCameraId;
+            } else {
+                const restoredCameraId = resolveStoredCameraId(
+                    state.availableCameras,
+                    state.selectedCameraId,
+                );
+
+                if (restoredCameraId) {
+                    syncSelectedCamera(restoredCameraId, {
+                        camera: state.availableCameras.find(
+                            (camera) => camera.deviceId === restoredCameraId,
+                        ),
+                    });
+                    dom.cameraSelect.value = restoredCameraId;
+                }
             }
 
             if (state.availableCameras.length === 0) {
@@ -401,30 +538,31 @@ export function createCameraController({ state, dom, ui }) {
                 : await updateCameraList();
 
         if (isIOS()) {
-            if (
-                preferredCameraId &&
-                cameras.some((camera) => camera.deviceId === preferredCameraId)
-            ) {
-                return preferredCameraId;
+            const restoredCameraId = resolveStoredCameraId(
+                cameras,
+                preferredCameraId,
+            );
+
+            if (restoredCameraId) {
+                return restoredCameraId;
             }
 
             return cameras.find((camera) => camera.deviceId === IOS_BACK_CAMERA_ID)
                 ?.deviceId || cameras[0]?.deviceId || null;
         }
 
+        const restoredCameraId = resolveStoredCameraId(cameras, preferredCameraId);
+
+        if (restoredCameraId) {
+            debugCamera('pick_camera_id_preferred', {
+                preferredCameraId,
+                resolvedCameraId: restoredCameraId,
+                matched: true,
+            });
+            return restoredCameraId;
+        }
+
         if (preferredCameraId) {
-            const preferredCamera = cameras.find(
-                (camera) => camera.deviceId === preferredCameraId,
-            );
-
-            if (preferredCamera) {
-                debugCamera('pick_camera_id_preferred', {
-                    preferredCameraId,
-                    matched: true,
-                });
-                return preferredCameraId;
-            }
-
             resetSelectedCamera('stale_selected_camera');
         }
 

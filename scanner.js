@@ -107,9 +107,15 @@ export function createScannerController({
             resumeAfterSelection: true,
         });
 
-        if (result?.status !== 'selection_required') {
-            camera.scheduleRestartIfAllowed(1000);
+        if (result?.status === 'selection_required') {
+            return;
         }
+
+        const restartDelay = ['not_found', 'invalid', 'error'].includes(result?.status)
+            ? 1500
+            : 1000;
+
+        camera.scheduleRestartIfAllowed(restartDelay);
     }
 
     return {

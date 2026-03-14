@@ -135,8 +135,8 @@ export function createUiController({ dom }) {
             colorClass = 'success';
         } else if (status === 'not_found') {
             text = message
-                ? `РџРµСЂРµРґР°С‡Р° СЃ ID ${message} РЅРµ РЅР°Р№РґРµРЅР°`
-                : 'РџРµСЂРµРґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°';
+                ? `Передача с ID ${message} не найдена`
+                : 'Передача не найдена';
             colorClass = 'error';
         } else if (status === 'error') {
             text = message;
