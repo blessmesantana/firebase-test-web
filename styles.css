@@ -39,6 +39,8 @@ html {
     --color-input-bg: #ffffff;
     --color-input-text: #3949AB;
     --color-input-muted: #5A6AD2;
+    --color-data-entry-textarea-bg: var(--color-surface-soft);
+    --color-data-entry-textarea-text: var(--color-text-primary);
     --color-button-group-bg: #C4CAEF;
     --color-qr-surface: rgba(255, 255, 255, 0.08);
     --color-platinum-bg: linear-gradient(135deg, #eef2f6, #bfc7d2);
@@ -96,6 +98,8 @@ body[data-theme='dark'] {
     --color-input-bg: #171717;
     --color-input-text: #f5f5f5;
     --color-input-muted: #b8b8c2;
+    --color-data-entry-textarea-bg: var(--color-input-bg);
+    --color-data-entry-textarea-text: var(--color-input-text);
     --color-button-group-bg: rgba(255, 255, 255, 0.06);
     --color-qr-surface: #1b1b1b;
     --color-platinum-bg: linear-gradient(135deg, #d0e7ff55, #a0d8ff);
@@ -1915,8 +1919,8 @@ input[type="date"]:focus {
     margin-bottom: 0;
     border: none;
     border-radius: 18px;
-    background: var(--color-input-bg);
-    color: var(--color-input-text);
+    background: var(--color-data-entry-textarea-bg);
+    color: var(--color-data-entry-textarea-text);
     outline: none;
     font-family: 'Inter', sans-serif;
     font-size: 13px;
