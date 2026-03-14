@@ -408,11 +408,6 @@ export function createCameraController({ state, dom, ui }) {
             return;
         }
 
-        const message = isIOS()
-            ? 'Запрос доступа к камере (iOS)'
-            : 'Запрос доступа к камере';
-
-        ui.showCameraNotice('info', message);
         state.cameraMessages.requestShown = true;
     }
 
@@ -421,11 +416,6 @@ export function createCameraController({ state, dom, ui }) {
             return;
         }
 
-        const message = isIOS()
-            ? 'Доступ к камере получен (iOS)'
-            : 'Доступ к камере получен';
-
-        ui.showCameraNotice('info', message);
         state.cameraMessages.grantedShown = true;
     }
 

@@ -541,13 +541,17 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
 }
 
 .archive-action-group > button {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
     width: auto !important;
+    min-height: 44px;
     min-width: 0;
     margin: 0 !important;
-    padding: 12px 0 10px 0 !important;
+    padding: 0 10px !important;
     text-align: center;
     font-size: 13px !important;
-    line-height: normal;
+    line-height: 1.15;
     white-space: nowrap;
 }
 
