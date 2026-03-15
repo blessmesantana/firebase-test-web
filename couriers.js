@@ -42,6 +42,41 @@ async function loadCourierTransfers({ courierName, service }) {
     };
 }
 
+async function loadCompletedCourierNames({ courierNames, service }) {
+    if (!Array.isArray(courierNames) || courierNames.length === 0) {
+        return new Set();
+    }
+
+    const [deliveries, scans] = await Promise.all([
+        service.getDeliveries(),
+        service.getScans(),
+    ]);
+    const completedCourierNames = new Set();
+
+    courierNames.forEach((courierName) => {
+        const courierDeliveries = deliveries.filter(
+            (delivery) => delivery.courier_name === courierName,
+        );
+
+        if (courierDeliveries.length === 0) {
+            return;
+        }
+
+        const scannedIds = new Set(
+            scans
+                .filter((scan) => scan.courier_name === courierName)
+                .map((scan) => scan.delivery_id),
+        );
+        const allScanned = courierDeliveries.every((delivery) => scannedIds.has(delivery.id));
+
+        if (allScanned) {
+            completedCourierNames.add(courierName);
+        }
+    });
+
+    return completedCourierNames;
+}
+
 async function renderCourierStatsModal({ courierName, service, ui }) {
     const modal = ui.createModal({
         className: 'courierStatsModalContent',
@@ -238,7 +273,7 @@ async function toggleCourierAccordionItem({
     item.dataset.loaded = 'true';
 }
 
-function createCourierAccordionItem({ courierName, page, service }) {
+function createCourierAccordionItem({ courierName, isComplete, page, service }) {
     const item = document.createElement('div');
     item.className = 'courier-accordion';
 
@@ -250,6 +285,15 @@ function createCourierAccordionItem({ courierName, page, service }) {
     const label = document.createElement('span');
     label.className = 'courier-accordion-label';
     label.textContent = courierName;
+
+    const status = document.createElement('span');
+    status.className = 'courier-accordion-status';
+    status.setAttribute('aria-hidden', 'true');
+    status.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 10.5L8.2 13.7L15 6.9" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    if (isComplete) {
+        status.classList.add('is-complete');
+    }
 
     const chevron = document.createElement('span');
     chevron.className = 'courier-accordion-chevron';
@@ -268,6 +312,7 @@ function createCourierAccordionItem({ courierName, page, service }) {
 
     panelInner.appendChild(panelBody);
     panel.appendChild(panelInner);
+    button.appendChild(status);
     button.appendChild(label);
     button.appendChild(chevron);
     item.appendChild(button);
@@ -304,7 +349,7 @@ export async function openCourierPage({ service, ui, direction }) {
 
     appendEmptyState(page.body, 'Загрузка...');
 
-    function renderCourierList(couriers) {
+    async function renderCourierList(couriers) {
         if (!isPageHandleActive(page)) {
             return;
         }
@@ -318,10 +363,25 @@ export async function openCourierPage({ service, ui, direction }) {
 
         const list = document.createElement('div');
         list.className = 'app-page-list';
+        let completedCourierNames = new Set();
+
+        try {
+            completedCourierNames = await loadCompletedCourierNames({
+                courierNames: couriers,
+                service,
+            });
+        } catch (error) {
+            console.error('Ошибка загрузки статусов курьеров:', error);
+        }
+
+        if (!isPageHandleActive(page)) {
+            return;
+        }
 
         couriers.forEach((courierName) => {
             list.appendChild(createCourierAccordionItem({
                 courierName,
+                isComplete: completedCourierNames.has(courierName),
                 page,
                 service,
             }));
@@ -333,7 +393,7 @@ export async function openCourierPage({ service, ui, direction }) {
     if (typeof service.subscribeCouriers === 'function') {
         unsubscribeCouriers = service.subscribeCouriers(
             (couriers) => {
-                renderCourierList(uniqueSortedCourierNames(couriers));
+                void renderCourierList(uniqueSortedCourierNames(couriers));
             },
             (error) => {
                 console.error('Ошибка загрузки курьеров:', error);
@@ -350,7 +410,7 @@ export async function openCourierPage({ service, ui, direction }) {
     }
 
     try {
-        renderCourierList(await getCourierNames(service));
+        await renderCourierList(await getCourierNames(service));
     } catch (error) {
         console.error('Ошибка загрузки курьеров:', error);
 

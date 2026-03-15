@@ -704,9 +704,10 @@ export function createCameraController({ state, dom, ui }) {
         }, delayMs);
     }
 
-    async function startQrScanner(cameraIdOverride) {
+    async function startQrScanner(cameraIdOverride, options = {}) {
         debugCamera('start_qr_scanner_enter', {
             cameraIdOverride,
+            allowOffHome: Boolean(options.allowOffHome),
             activeRootScreen: state.activeRootScreen,
             scannerPhase: state.scannerPhase,
             scannerActive: state.scannerActive,
@@ -715,9 +716,10 @@ export function createCameraController({ state, dom, ui }) {
             hasStream: Boolean(state.stream),
         });
 
-        if (!isHomeScreenActive()) {
+        if (!isHomeScreenActive() && !options.allowOffHome) {
             debugCamera('start_qr_scanner_blocked_non_home', {
                 cameraIdOverride,
+                allowOffHome: Boolean(options.allowOffHome),
                 activeRootScreen: state.activeRootScreen,
                 selectedCameraId: state.selectedCameraId,
             });
@@ -873,7 +875,6 @@ export function createCameraController({ state, dom, ui }) {
     async function handleCameraSelection(cameraId, options = {}) {
         const restartIfActive =
             Boolean(options.restartIfActive) &&
-            isHomeScreenActive() &&
             isScannerActive();
 
         syncSelectedCamera(cameraId || null);
@@ -890,7 +891,9 @@ export function createCameraController({ state, dom, ui }) {
         }
 
         stopQrScanner({ reason: 'camera_switch' });
-        await startQrScanner(state.selectedCameraId);
+        await startQrScanner(state.selectedCameraId, {
+            allowOffHome: true,
+        });
     }
 
     return {

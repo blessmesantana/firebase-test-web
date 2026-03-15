@@ -32,7 +32,9 @@ document.addEventListener('DOMContentLoaded', () => {
         inputModeButton: document.getElementById('inputModeButton'),
         loadingIndicator: document.getElementById('loadingIndicator'),
         manualInputContainer: document.getElementById('manualInputContainer'),
-        manualTransferForm: document.getElementById('manualTransferForm'),
+        manualTransferForm:
+            document.getElementById('manualTransferForm')
+            || document.getElementById('inputModeButton'),
         manualSubmitButton: document.getElementById('manualSubmitButton'),
         manualTransferIdInput: document.getElementById('manualTransferId'),
         qrContainer: document.querySelector('.qr-container'),
@@ -108,6 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
+    const APP_VERSION = 'v1.5.07';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -446,6 +449,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.manualTransferForm) {
         dom.manualTransferForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            void submitManualTransferId();
+        });
+    }
+
+    if (dom.manualSubmitButton) {
+        dom.manualSubmitButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            void submitManualTransferId();
+        });
+    }
+
+    if (dom.manualTransferIdInput) {
+        dom.manualTransferIdInput.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
             event.preventDefault();
             void submitManualTransferId();
         });
@@ -1113,6 +1134,11 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(cameraButton);
         card.appendChild(cameraSelector);
         page.body.appendChild(card);
+
+        const versionNote = document.createElement('div');
+        versionNote.className = 'settings-version-note';
+        versionNote.textContent = APP_VERSION;
+        page.body.appendChild(versionNote);
     }
 
     function showScannerHomePage(options = {}) {
