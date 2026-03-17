@@ -160,17 +160,15 @@ body[data-theme='dark'] .archive-modal-content .archive-confirm-btn {
     color: var(--color-primary-text) !important;
     border: 1px solid var(--color-platinum-border);
     box-shadow:
-        0 0 14px rgba(160, 216, 255, 0.46),
-        0 0 30px rgba(160, 216, 255, 0.22),
+        0 0 10px rgba(160, 216, 255, 0.36),
+        0 0 24px rgba(160, 216, 255, 0.18),
+        0 0 44px rgba(160, 216, 255, 0.12),
         0 0 10px rgba(200, 240, 255, 0.4) inset;
 }
 
 html[data-theme='dark'] .archive-action-group > button,
 body[data-theme='dark'] .archive-action-group > button {
-    box-shadow:
-        0 0 10px rgba(160, 216, 255, 0.42),
-        0 0 20px rgba(160, 216, 255, 0.16),
-        0 0 10px rgba(200, 240, 255, 0.36) inset;
+    box-shadow: none;
 }
 
 html[data-theme='dark'] .data-entry-submit-button:hover,
@@ -187,17 +185,29 @@ body[data-theme='dark'] .archive-modal-content .archive-move-btn:hover,
 body[data-theme='dark'] .archive-modal-content .archive-confirm-btn:hover {
     background: var(--color-primary-hover) !important;
     box-shadow:
-        0 0 16px rgba(160, 216, 255, 0.54),
-        0 0 34px rgba(160, 216, 255, 0.26),
+        0 0 12px rgba(160, 216, 255, 0.42),
+        0 0 28px rgba(160, 216, 255, 0.2),
+        0 0 48px rgba(160, 216, 255, 0.14),
         0 0 10px rgba(200, 240, 255, 0.48) inset;
 }
 
 html[data-theme='dark'] .archive-action-group > button:hover,
 body[data-theme='dark'] .archive-action-group > button:hover {
-    box-shadow:
-        0 0 12px rgba(160, 216, 255, 0.5),
-        0 0 24px rgba(160, 216, 255, 0.18),
-        0 0 10px rgba(200, 240, 255, 0.42) inset;
+    box-shadow: none;
+}
+
+html[data-theme='dark'] .data-entry-screen .data-entry-submit-button,
+body[data-theme='dark'] .data-entry-screen .data-entry-submit-button,
+html[data-theme='dark'] .data-entry-screen .data-entry-submit-button:hover,
+body[data-theme='dark'] .data-entry-screen .data-entry-submit-button:hover {
+    box-shadow: none;
+}
+
+html[data-theme='dark'] .settings-screen .data-entry-submit-button,
+body[data-theme='dark'] .settings-screen .data-entry-submit-button,
+html[data-theme='dark'] .settings-screen .data-entry-submit-button:hover,
+body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
+    box-shadow: none;
 }
 
 .page {
@@ -367,6 +377,11 @@ body[data-theme='dark'] .archive-action-group > button:hover {
     overflow: hidden;
 }
 
+#archivePage .app-page-panel,
+#dataEntryPage .app-page-panel {
+    padding-bottom: calc(98px + env(safe-area-inset-bottom, 0px));
+}
+
 .app-page-header {
     display: flex;
     align-items: center;
@@ -391,10 +406,10 @@ body[data-theme='dark'] .archive-action-group > button:hover {
 }
 
 .app-page-card {
-    background: var(--color-surface);
+    background: transparent;
     border-radius: 24px;
     padding: 18px 16px;
-    box-shadow: var(--shadow-card);
+    box-shadow: none;
 }
 
 .app-page-list {
@@ -538,6 +553,17 @@ body[data-theme='dark'] .archive-action-group > button:hover {
 .archive-screen .archive-page-layout {
     flex: 1 1 auto;
     min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 12px;
+}
+
+.archive-screen {
+    overflow: hidden;
+}
+
+.app-page-body.archive-screen {
+    overflow: hidden;
 }
 
 .archive-courier-list {
@@ -549,6 +575,7 @@ body[data-theme='dark'] .archive-action-group > button:hover {
 .archive-screen .archive-courier-picker {
     flex: 1 1 auto;
     min-height: 0;
+    overflow: hidden;
 }
 
 .archive-screen .archive-courier-list {
@@ -597,9 +624,14 @@ body[data-theme='dark'] .archive-action-group > button:hover {
 }
 
 .archive-screen .archive-action-group {
-    margin-top: auto;
-    padding-top: 10px;
-    padding-bottom: 18px;
+    margin-top: 0;
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    padding-inline: 0;
+    transform: none;
 }
 
 .archive-action-group > button {
@@ -607,14 +639,30 @@ body[data-theme='dark'] .archive-action-group > button:hover {
     align-items: center;
     justify-content: center;
     width: auto !important;
-    min-height: 44px;
+    min-height: 48px;
     min-width: 0;
     margin: 0 !important;
-    padding: 0 10px !important;
+    padding: 0 8px !important;
     text-align: center;
     font-size: 13px !important;
     line-height: 1.15;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+@media (max-width: 430px) {
+    .archive-action-group > button {
+        min-height: 52px;
+        padding: 0 6px !important;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
 }
 
 /* --- Анимация для кнопки и поля ввода --- */
@@ -1924,7 +1972,10 @@ input[type="date"]:focus {
 }
 
 .data-entry-screen {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
     gap: 14px;
+    overflow: hidden;
 }
 
 #dataEntryPage .app-page-title,
@@ -1957,7 +2008,9 @@ input[type="date"]:focus {
 
 .data-entry-screen .data-entry-textarea {
     flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
+    overflow-y: auto;
 }
 
 .data-entry-submit-button {
@@ -1970,6 +2023,9 @@ input[type="date"]:focus {
     width: calc(100% - 24px) !important;
     max-width: calc(100% - 24px) !important;
     margin-inline: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    transform: none;
 }
 
 .settings-screen .app-page-card {
@@ -2192,8 +2248,9 @@ input[type="date"]:focus {
 .camera-picker-option-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    justify-content: center;
     min-width: 0;
+    text-align: left;
 }
 
 .camera-picker-option-title {
@@ -2202,11 +2259,7 @@ input[type="date"]:focus {
 }
 
 .camera-picker-option-meta {
-    color: var(--color-text-secondary);
-    font: 500 11px 'Inter', sans-serif;
-    line-height: 1.25;
-    opacity: 0.92;
-    word-break: break-word;
+    display: none;
 }
 
 .camera-picker-option.is-selected .camera-picker-option-meta {
