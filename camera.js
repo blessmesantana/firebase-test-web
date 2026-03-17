@@ -320,7 +320,7 @@ export function createCameraController({ state, dom, ui }) {
 
         let cameras = await readVideoInputs();
 
-        if (isIOS() && cameras.length <= 1) {
+        if (isIOS()) {
             return buildIosVirtualCameras(cameras);
         }
 
@@ -351,10 +351,6 @@ export function createCameraController({ state, dom, ui }) {
             cameras = await readVideoInputs();
         } catch (error) {
             console.warn('Не удалось обновить список камер после прогрева:', error);
-        }
-
-        if (isIOS()) {
-            return buildIosVirtualCameras(cameras);
         }
 
         return cameras;
@@ -437,8 +433,10 @@ export function createCameraController({ state, dom, ui }) {
             activeRootScreen: state.activeRootScreen,
         });
 
+        const decodeDeviceId = isIOS() ? undefined : (cameraIdToUse || undefined);
+
         codeReader.decodeFromVideoDevice(
-            cameraIdToUse || undefined,
+            decodeDeviceId,
             dom.videoElement.id,
             (result, error) => {
                 if (

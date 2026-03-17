@@ -112,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.5.08';
+    const APP_VERSION = 'v1.5.10';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -179,6 +179,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setActiveBottomNav(activeKey) {
+        if (activeKey !== 'home') {
+            stopCameraForLifecycle(`nav_to_${activeKey}`);
+        }
+
         const entries = {
             archive: dom.bottomArchiveButton,
             couriers: dom.bottomCouriersButton,
@@ -241,6 +245,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('mousedown', handleSidebarClose);
     document.addEventListener('touchstart', handleSidebarClose);
+
+    function stopCameraForLifecycle(reason, options = {}) {
+        const shouldClearScanResult = options.clearScanResult !== false;
+
+        if (
+            !state.scannerActive &&
+            !state.scannerStarting &&
+            !state.stream &&
+            !state.scanPause?.active
+        ) {
+            return;
+        }
+
+        camera.cancelPendingRestart();
+        camera.setAutoRestartAllowed(false);
+        camera.stopQrScanner({ manual: true, reason });
+        ui.setQrViewportState('idle');
+        ui.setVideoVisible(false);
+
+        if (shouldClearScanResult) {
+            ui.clearScanResult();
+        }
+
+        hideCameraMenu();
+    }
 
     async function startScanFromButton() {
         debugCamera('scan_button_click', {
@@ -1211,13 +1240,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         lastCameraStopAt = now;
-
-        camera.cancelPendingRestart();
-        camera.setAutoRestartAllowed(false);
-        camera.stopQrScanner({ manual: true, reason: 'camera_stop_button' });
-        ui.setQrViewportState('idle');
-        ui.setVideoVisible(false);
-        ui.clearScanResult();
+        stopCameraForLifecycle('camera_stop_button');
 
         debugCamera('camera_stop_button', {
             activeRootScreen: state.activeRootScreen,
@@ -1230,6 +1253,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         hideCameraMenu();
     }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'hidden') {
+            return;
+        }
+
+        stopCameraForLifecycle('app_hidden');
+    });
+
+    window.addEventListener('pagehide', () => {
+        stopCameraForLifecycle('app_pagehide');
+    });
 
     if (dom.bottomDataButton) {
         dom.bottomDataButton.addEventListener('click', () => {
