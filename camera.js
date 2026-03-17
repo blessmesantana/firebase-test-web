@@ -114,6 +114,10 @@ export function createCameraController({ state, dom, ui }) {
     }
 
     function getStoredCameraSignature() {
+        if (isIOS()) {
+            return null;
+        }
+
         return state.selectedCameraSignature
             || localStorage.getItem(CAMERA_SIGNATURE_STORAGE_KEY)
             || null;
@@ -538,13 +542,12 @@ export function createCameraController({ state, dom, ui }) {
                 : await updateCameraList();
 
         if (isIOS()) {
-            const restoredCameraId = resolveStoredCameraId(
-                cameras,
-                preferredCameraId,
-            );
-
-            if (restoredCameraId) {
-                return restoredCameraId;
+            if (
+                (preferredCameraId === IOS_BACK_CAMERA_ID ||
+                    preferredCameraId === IOS_FRONT_CAMERA_ID) &&
+                cameras.some((camera) => camera.deviceId === preferredCameraId)
+            ) {
+                return preferredCameraId;
             }
 
             return cameras.find((camera) => camera.deviceId === IOS_BACK_CAMERA_ID)

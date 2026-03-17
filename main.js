@@ -11,6 +11,8 @@ import { createUiController } from './ui.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
+    const IS_IOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
     function debugCamera(event, payload = {}) {
         if (!DEBUG_CAMERA) {
@@ -81,9 +83,9 @@ document.addEventListener('DOMContentLoaded', () => {
         scannerActive: false,
         scannerPhase: 'idle',
         scannerStarting: false,
-        selectedCameraId: localStorage.getItem('selectedCameraId') || null,
+        selectedCameraId: IS_IOS ? null : localStorage.getItem('selectedCameraId') || null,
         selectedCameraSignature:
-            localStorage.getItem('selectedCameraSignature') || null,
+            IS_IOS ? null : localStorage.getItem('selectedCameraSignature') || null,
         stopReason: null,
         stream: null,
     };
@@ -110,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.5.07';
+    const APP_VERSION = 'v1.5.08';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -423,7 +425,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (dom.inputModeButton) {
-        dom.inputModeButton.addEventListener('click', () => {
+        dom.inputModeButton.addEventListener('click', (event) => {
+            if (event.target?.closest?.('#manualSubmitButton')) {
+                return;
+            }
+
             ui.showManualInput();
             camera.stopQrScanner({ manual: true, reason: 'manual_input' });
             ui.setQrViewportState('idle');
@@ -449,13 +455,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.manualTransferForm) {
         dom.manualTransferForm.addEventListener('submit', (event) => {
-            event.preventDefault();
-            void submitManualTransferId();
-        });
-    }
-
-    if (dom.manualSubmitButton) {
-        dom.manualSubmitButton.addEventListener('click', (event) => {
             event.preventDefault();
             void submitManualTransferId();
         });
