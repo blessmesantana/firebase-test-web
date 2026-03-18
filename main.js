@@ -112,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.6.2.3';
+    const APP_VERSION = 'v1.6.2.4';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
