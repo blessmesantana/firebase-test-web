@@ -112,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.6.1.2';
+    const APP_VERSION = 'v1.6.2';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -467,19 +467,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    let manualSubmitInFlight = false;
+
+    function normalizeTransferId(rawValue) {
+        return String(rawValue || '').replace(/\D/g, '');
+    }
+
     async function submitManualTransferId() {
-        const transferId = dom.manualTransferIdInput?.value.trim() || '';
+        if (manualSubmitInFlight) {
+            return;
+        }
+
+        const transferId = normalizeTransferId(dom.manualTransferIdInput?.value);
+
+        manualSubmitInFlight = true;
 
         camera.stopQrScanner({ manual: true, reason: 'manual_input_submit' });
         ui.setQrViewportState('idle');
         ui.setVideoVisible(false);
 
-        if (/^\d{4}$/.test(transferId) || /^\d{10}$/.test(transferId)) {
-            await scanner.processTransferId(transferId);
-            return;
-        }
+        try {
+            if (/^\d{4}$/.test(transferId) || /^\d{10}$/.test(transferId)) {
+                await scanner.processTransferId(transferId);
+                return;
+            }
 
-        ui.showScanResult('error', 'Неверный формат ID', '', '', '');
+            ui.showScanResult('error', 'Неверный формат ID', '', '', '');
+        } finally {
+            manualSubmitInFlight = false;
+        }
     }
 
     if (dom.manualTransferForm) {
@@ -489,14 +505,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (dom.manualTransferIdInput) {
-        dom.manualTransferIdInput.addEventListener('keydown', (event) => {
-            if (event.key !== 'Enter') {
+    if (dom.manualSubmitButton) {
+        dom.manualSubmitButton.addEventListener('click', (event) => {
+            event.preventDefault();
+
+            if (!dom.manualTransferForm) {
+                void submitManualTransferId();
                 return;
             }
 
-            event.preventDefault();
-            void submitManualTransferId();
+            if (typeof dom.manualTransferForm.requestSubmit === 'function') {
+                dom.manualTransferForm.requestSubmit(dom.manualSubmitButton);
+                return;
+            }
+
+            dom.manualTransferForm.dispatchEvent(
+                new Event('submit', { bubbles: true, cancelable: true }),
+            );
         });
     }
 
