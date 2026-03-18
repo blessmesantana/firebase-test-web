@@ -11,8 +11,14 @@ import { createUiController } from './ui.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
-    const IS_IOS =
-        /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const IS_IOS = (() => {
+        const ua = navigator.userAgent || '';
+        const isAppleMobile = /iPad|iPhone|iPod/.test(ua);
+        const isIpadOsDesktopMode =
+            navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+        return isAppleMobile || isIpadOsDesktopMode;
+    })();
+    document.documentElement.classList.toggle('platform-ios', IS_IOS);
 
     function debugCamera(event, payload = {}) {
         if (!DEBUG_CAMERA) {
@@ -38,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('manualTransferForm')
             || document.getElementById('inputModeButton'),
         manualSubmitButton: document.getElementById('manualSubmitButton'),
+        manualSubmitButtonIos: null,
         manualTransferIdInput: document.getElementById('manualTransferId'),
         qrContainer: document.querySelector('.qr-container'),
         qrIcons: Array.from(document.querySelectorAll('.qr-icon')),
@@ -90,6 +97,33 @@ document.addEventListener('DOMContentLoaded', () => {
         stream: null,
     };
 
+    function setupIosManualSubmitButton() {
+        if (!IS_IOS || !dom.manualSubmitButton) {
+            return;
+        }
+
+        const iosButton = document.createElement('button');
+        iosButton.id = 'manualSubmitButtonIos';
+        iosButton.type = 'button';
+        iosButton.className = `${dom.manualSubmitButton.className} manual-entry-submit-ios`;
+        iosButton.setAttribute(
+            'aria-label',
+            dom.manualSubmitButton.getAttribute('aria-label') || 'Отправить ID',
+        );
+        iosButton.setAttribute(
+            'title',
+            dom.manualSubmitButton.getAttribute('title') || 'Отправить ID',
+        );
+        iosButton.innerHTML = dom.manualSubmitButton.innerHTML;
+
+        dom.manualSubmitButton.setAttribute('aria-hidden', 'true');
+        dom.manualSubmitButton.tabIndex = -1;
+        dom.manualSubmitButton.after(iosButton);
+        dom.manualSubmitButtonIos = iosButton;
+    }
+
+    setupIosManualSubmitButton();
+
     const ui = createUiController({ dom });
     const camera = createCameraController({ state, dom, ui });
     const scanner = createScannerController({
@@ -112,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.6.2.4';
+    const APP_VERSION = 'v1.6.2.6';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -455,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.inputModeButton) {
         dom.inputModeButton.addEventListener('click', (event) => {
-            if (event.target?.closest?.('#manualSubmitButton')) {
+            if (event.target?.closest?.('#manualSubmitButton, #manualSubmitButtonIos')) {
                 return;
             }
 
@@ -526,6 +560,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 new Event('submit', { bubbles: true, cancelable: true }),
             );
         });
+    }
+
+    if (IS_IOS && dom.manualSubmitButtonIos) {
+        let lastIosSubmitAt = 0;
+        const IOS_SUBMIT_DEBOUNCE_MS = 320;
+
+        function handleIosManualSubmit(event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const now = Date.now();
+            if (now - lastIosSubmitAt < IOS_SUBMIT_DEBOUNCE_MS) {
+                return;
+            }
+
+            lastIosSubmitAt = now;
+            void submitManualTransferId();
+        }
+
+        dom.manualSubmitButtonIos.addEventListener('touchend', handleIosManualSubmit, {
+            passive: false,
+        });
+        dom.manualSubmitButtonIos.addEventListener('click', handleIosManualSubmit);
     }
 
     async function saveRawData(rawData) {

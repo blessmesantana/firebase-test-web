@@ -767,7 +767,19 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
         box-shadow var(--ui-duration-base) var(--ui-ease-soft);
 }
 
-#inputModeButton.active .manual-entry-submit,
+#manualSubmitButtonIos {
+    display: none;
+}
+
+html.platform-ios #manualSubmitButton {
+    visibility: hidden;
+    pointer-events: none !important;
+}
+
+html.platform-ios #manualSubmitButtonIos {
+    display: inline-flex;
+}
+
 .manual-entry-group:focus-within .manual-entry-submit,
 .manual-entry-input:not(:placeholder-shown) + .manual-entry-submit {
     opacity: 1;
@@ -925,6 +937,7 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     .button-group-item,
     .qr-container::before,
     #manualSubmitButton,
+    #manualSubmitButtonIos,
     #inputModeButton {
         transition: none;
         animation: none;
@@ -1602,7 +1615,8 @@ input[type="checkbox"]:checked ~ #sidebarMenu {
         width: calc(100% - 30px);
     }
 
-    #manualSubmitButton {
+    #manualSubmitButton,
+    #manualSubmitButtonIos {
         width: 40px;
         font-size: 13px !important;
     }
