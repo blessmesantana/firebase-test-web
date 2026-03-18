@@ -112,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.6.2.2';
+    const APP_VERSION = 'v1.6.2.3';
     const THEMES = ['blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         blue: '#3949AB',
@@ -508,6 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dom.manualSubmitButton) {
         dom.manualSubmitButton.addEventListener('click', (event) => {
             event.preventDefault();
+            event.stopPropagation();
 
             if (!dom.manualTransferForm) {
                 void submitManualTransferId();
@@ -515,8 +516,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (typeof dom.manualTransferForm.requestSubmit === 'function') {
-                dom.manualTransferForm.requestSubmit(dom.manualSubmitButton);
-                return;
+                try {
+                    dom.manualTransferForm.requestSubmit();
+                    return;
+                } catch (error) {}
             }
 
             dom.manualTransferForm.dispatchEvent(

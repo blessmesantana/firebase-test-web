@@ -743,7 +743,7 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     position: absolute;
     right: 6px;
     top: 50%;
-    transform: translateY(-50%) scale(0.92);
+    transform: translateY(-50%) scale(1);
     width: 42px;
     height: 42px;
     display: inline-flex;
@@ -757,20 +757,14 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     z-index: 2;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
     transition:
         background var(--ui-duration-base) var(--ui-ease-soft),
         color var(--ui-duration-base) var(--ui-ease-soft),
         opacity var(--ui-duration-fast) var(--ui-ease-soft),
         transform var(--ui-duration-fast) var(--ui-ease-standard),
         box-shadow var(--ui-duration-base) var(--ui-ease-soft);
-}
-
-.manual-entry-group:focus-within .manual-entry-submit {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(-50%) scale(1);
 }
 
 .manual-entry-submit:hover,
@@ -1601,7 +1595,7 @@ input[type="checkbox"]:checked ~ #sidebarMenu {
     }
 
     #manualSubmitButton {
-        width: 90px;
+        width: 40px;
         font-size: 13px !important;
     }
 
