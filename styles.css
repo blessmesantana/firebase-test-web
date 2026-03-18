@@ -724,7 +724,7 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     border: solid 1.5px var(--color-text-secondary);
     border-radius: 50px;
     background: none;
-    padding: 0.7rem 3rem 0.7rem 1rem;
+    padding: 0.7rem 3.8rem 0.7rem 1rem;
     font-size: 1rem;
     line-height: 1.2;
     color: var(--color-text-primary);
@@ -741,19 +741,22 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
 
 .manual-entry-submit {
     position: absolute;
-    right: 14px;
+    right: 6px;
     top: 50%;
     transform: translateY(-50%) scale(0.92);
-    width: 20px;
-    height: 20px;
+    width: 42px;
+    height: 42px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border: none;
+    border-radius: 999px;
     background: transparent;
     color: var(--color-frame);
     cursor: pointer;
     z-index: 2;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
     opacity: 0;
     pointer-events: none;
     transition:
@@ -1608,9 +1611,9 @@ input[type="checkbox"]:checked ~ #sidebarMenu {
     }
 
     .manual-entry-submit {
-        width: 36px;
-        height: 36px;
-        right: 10px;
+        width: 40px;
+        height: 40px;
+        right: 6px;
     }
 
     .qr-container {
