@@ -1,4 +1,5 @@
 import { database } from './firebase.js';
+import { captureException } from './logger.js';
 import {
     get,
     onValue,
@@ -124,6 +125,11 @@ export async function getScans() {
     return getCollection('scans');
 }
 
+export async function getTelemetryEvents() {
+    const items = await getCollection('telemetry_events');
+    return items.sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+}
+
 function subscribeCollection(path, onData, onError = null) {
     const collectionRef = ref(database, path);
 
@@ -142,6 +148,13 @@ function subscribeCollection(path, onData, onError = null) {
             onData(cloneCollection(items));
         },
         (error) => {
+            captureException(error, {
+                operation: 'subscribe_collection',
+                path,
+                tags: {
+                    scope: 'firebase',
+                },
+            });
             if (typeof onError === 'function') {
                 onError(error);
             } else {
@@ -153,6 +166,18 @@ function subscribeCollection(path, onData, onError = null) {
 
 export function subscribeCouriers(onData, onError = null) {
     return subscribeCollection('couriers', onData, onError);
+}
+
+export function subscribeTelemetryEvents(onData, onError = null) {
+    return subscribeCollection(
+        'telemetry_events',
+        (items) => {
+            onData(
+                items.sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0)),
+            );
+        },
+        onError,
+    );
 }
 
 export async function warmAdminData() {

@@ -1,3 +1,10 @@
+import {
+    captureException,
+    captureMessage,
+    setContext as setLoggerContext,
+    trackEvent,
+} from './logger.js';
+
 function isIOS() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 }
@@ -193,6 +200,9 @@ export function createCameraController({ state, dom, ui }) {
         }
 
         syncCameraSelectValue(state.selectedCameraId);
+        setLoggerContext({
+            selectedCameraId: state.selectedCameraId || 'none',
+        });
     }
 
     function resetSelectedCamera(reason) {
@@ -305,6 +315,17 @@ export function createCameraController({ state, dom, ui }) {
             }
         } catch (error) {
             console.warn('Ошибка сброса QR-ридера:', error);
+            captureMessage(
+                'QR reader reset failed',
+                {
+                    operation: 'reset_code_reader',
+                    screen: state.activeRootScreen,
+                    tags: {
+                        scope: 'camera',
+                    },
+                },
+                'warning',
+            );
         } finally {
             if (discardInstance) {
                 state.codeReader = null;
@@ -342,6 +363,17 @@ export function createCameraController({ state, dom, ui }) {
             });
         } catch (error) {
             console.warn('Не удалось прогреть список камер:', error);
+            captureMessage(
+                'Camera warmup failed',
+                {
+                    operation: 'warmup_camera_list',
+                    screen: state.activeRootScreen,
+                    tags: {
+                        scope: 'camera',
+                    },
+                },
+                'warning',
+            );
             return cameras;
         } finally {
             tempStream?.getTracks?.().forEach((track) => track.stop());
@@ -351,6 +383,17 @@ export function createCameraController({ state, dom, ui }) {
             cameras = await readVideoInputs();
         } catch (error) {
             console.warn('Не удалось обновить список камер после прогрева:', error);
+            captureMessage(
+                'Camera list refresh after warmup failed',
+                {
+                    operation: 'refresh_camera_list_after_warmup',
+                    screen: state.activeRootScreen,
+                    tags: {
+                        scope: 'camera',
+                    },
+                },
+                'warning',
+            );
         }
 
         return cameras;
@@ -462,6 +505,13 @@ export function createCameraController({ state, dom, ui }) {
                     Promise.resolve(scanResultHandler?.(decodedText)).catch(
                         (scanError) => {
                             console.error('Ошибка обработки скана:', scanError);
+                            captureException(scanError, {
+                                operation: 'scan_result_handler',
+                                screen: state.activeRootScreen,
+                                tags: {
+                                    scope: 'scanner',
+                                },
+                            });
                         },
                     );
                     return;
@@ -469,6 +519,14 @@ export function createCameraController({ state, dom, ui }) {
 
                 if (error && !(error instanceof ZXing.NotFoundException)) {
                     console.error('Ошибка сканирования:', error);
+                    captureException(error, {
+                        operation: 'decode_from_video_device',
+                        screen: state.activeRootScreen,
+                        selectedCameraId: state.selectedCameraId || 'none',
+                        tags: {
+                            scope: 'scanner',
+                        },
+                    });
                 }
             },
         );
@@ -528,6 +586,13 @@ export function createCameraController({ state, dom, ui }) {
             return state.availableCameras;
         } catch (error) {
             console.error('Ошибка обновления списка камер:', error);
+            captureException(error, {
+                operation: 'update_camera_list',
+                screen: state.activeRootScreen,
+                tags: {
+                    scope: 'camera',
+                },
+            });
             dom.cameraSelect.style.display = 'none';
             return [];
         }
@@ -616,6 +681,17 @@ export function createCameraController({ state, dom, ui }) {
                 dom.videoElement.pause();
             } catch (error) {
                 console.warn('Ошибка паузы видеоэлемента:', error);
+                captureMessage(
+                    'Video element pause failed',
+                    {
+                        operation: 'pause_video_element',
+                        screen: state.activeRootScreen,
+                        tags: {
+                            scope: 'camera',
+                        },
+                    },
+                    'warning',
+                );
             }
 
             dom.videoElement.srcObject = null;
@@ -857,6 +933,36 @@ export function createCameraController({ state, dom, ui }) {
             state.scannerStarting = false;
             setScannerPhase('idle');
             console.error('Ошибка камеры:', error);
+            captureException(error, {
+                operation: 'start_qr_scanner',
+                screen: state.activeRootScreen,
+                selectedCameraId: state.selectedCameraId || 'none',
+                tags: {
+                    scope: 'camera',
+                },
+            });
+            trackEvent(
+                'camera_start_failed',
+                {
+                    errorName: error?.name || 'UnknownError',
+                    screen: state.activeRootScreen,
+                    selectedCameraId: state.selectedCameraId || 'none',
+                },
+                'error',
+            );
+            if (
+                error?.name === 'NotAllowedError'
+                || error?.name === 'PermissionDeniedError'
+            ) {
+                trackEvent(
+                    'camera_permission_denied',
+                    {
+                        screen: state.activeRootScreen,
+                        selectedCameraId: state.selectedCameraId || 'none',
+                    },
+                    'warning',
+                );
+            }
             debugCamera('start_qr_scanner_error', {
                 message: error?.message,
                 selectedCameraId: state.selectedCameraId,
@@ -879,6 +985,10 @@ export function createCameraController({ state, dom, ui }) {
             isScannerActive();
 
         syncSelectedCamera(cameraId || null);
+        trackEvent('camera_changed', {
+            cameraId: cameraId || 'none',
+            source: options.source || 'unknown',
+        });
         debugCamera('handle_camera_selection', {
             cameraId,
             selectedCameraId: state.selectedCameraId,

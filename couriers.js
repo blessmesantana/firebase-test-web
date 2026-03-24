@@ -4,6 +4,11 @@
     );
 }
 
+import {
+    captureException,
+    trackEvent,
+} from './logger.js';
+
 function appendEmptyState(target, text) {
     const empty = document.createElement('div');
     empty.className = 'app-page-card';
@@ -119,6 +124,12 @@ async function renderCourierStatsModal({ courierName, service, ui }) {
         }));
     } catch (error) {
         console.error('Ошибка загрузки передач курьера:', error);
+        captureException(error, {
+            operation: 'load_courier_transfers_modal',
+            tags: {
+                scope: 'couriers',
+            },
+        });
         ui.showToast('Не удалось загрузить передачи', {
             type: 'error',
             duration: 2200,
@@ -170,6 +181,12 @@ async function openCourierSelector({ service, ui }) {
         couriers = await getCourierNames(service);
     } catch (error) {
         console.error('Ошибка загрузки курьеров:', error);
+        captureException(error, {
+            operation: 'open_courier_selector',
+            tags: {
+                scope: 'couriers',
+            },
+        });
         ui.showToast('Не удалось загрузить курьеров', {
             type: 'error',
             duration: 2200,
@@ -228,6 +245,12 @@ async function toggleCourierAccordionItem({
         }));
     } catch (error) {
         console.error('Ошибка загрузки передач курьера:', error);
+        captureException(error, {
+            operation: 'load_courier_transfers_accordion',
+            tags: {
+                scope: 'couriers',
+            },
+        });
 
         if (!isPageHandleActive(page) || !item.isConnected) {
             return;
@@ -372,6 +395,12 @@ export async function openCourierPage({ service, ui, direction }) {
             });
         } catch (error) {
             console.error('Ошибка загрузки статусов курьеров:', error);
+            captureException(error, {
+                operation: 'load_completed_courier_names',
+                tags: {
+                    scope: 'couriers',
+                },
+            });
         }
 
         if (!isPageHandleActive(page)) {
@@ -397,6 +426,12 @@ export async function openCourierPage({ service, ui, direction }) {
             },
             (error) => {
                 console.error('Ошибка загрузки курьеров:', error);
+                captureException(error, {
+                    operation: 'subscribe_couriers_page',
+                    tags: {
+                        scope: 'couriers',
+                    },
+                });
 
                 if (!isPageHandleActive(page)) {
                     return;
@@ -413,6 +448,12 @@ export async function openCourierPage({ service, ui, direction }) {
         await renderCourierList(await getCourierNames(service));
     } catch (error) {
         console.error('Ошибка загрузки курьеров:', error);
+        captureException(error, {
+            operation: 'render_courier_page',
+            tags: {
+                scope: 'couriers',
+            },
+        });
 
         if (!isPageHandleActive(page)) {
             return;
@@ -540,6 +581,12 @@ async function appendArchiveControls({ container, service, ui }) {
             },
             (error) => {
                 console.error('Ошибка загрузки курьеров:', error);
+                captureException(error, {
+                    operation: 'subscribe_archive_couriers',
+                    tags: {
+                        scope: 'couriers',
+                    },
+                });
                 ui.showScanResult('error', 'Не удалось загрузить курьеров');
                 courierPicker.setItems([]);
             },
@@ -549,6 +596,12 @@ async function appendArchiveControls({ container, service, ui }) {
             renderCourierOptions(await getCourierNames(service));
         } catch (error) {
             console.error('Ошибка загрузки курьеров:', error);
+            captureException(error, {
+                operation: 'load_archive_couriers',
+                tags: {
+                    scope: 'couriers',
+                },
+            });
             ui.showScanResult('error', 'Не удалось загрузить курьеров');
             courierPicker.setItems([]);
         }
@@ -573,6 +626,9 @@ async function appendArchiveControls({ container, service, ui }) {
                 confirmDialog.confirmButton.textContent = 'Удаление...';
 
                 await service.deleteAllDailyData();
+                trackEvent('all_data_deleted', {
+                    scope: 'all',
+                }, 'warning');
 
                 confirmDialog.confirmButton.textContent = 'Готово!';
                 window.setTimeout(() => {
@@ -593,6 +649,9 @@ async function appendArchiveControls({ container, service, ui }) {
             confirmDialog.confirmButton.textContent = 'Удаление...';
 
             await service.deleteCourierCascade(selectedCourier);
+            trackEvent('courier_deleted', {
+                scope: 'single',
+            }, 'warning');
 
             confirmDialog.confirmButton.textContent = 'Готово!';
             window.setTimeout(() => {
@@ -619,6 +678,9 @@ async function appendArchiveControls({ container, service, ui }) {
             confirmDialog.confirmButton.textContent = 'Удаление...';
 
             await service.deleteDeliveriesAndRelatedScansByCourier(selectedCourier);
+            trackEvent('deliveries_deleted', {
+                scope: 'courier',
+            }, 'warning');
 
             confirmDialog.confirmButton.textContent = 'Готово!';
             window.setTimeout(() => {
@@ -637,6 +699,9 @@ async function appendArchiveControls({ container, service, ui }) {
         }
 
         await service.deleteAllDeliveriesAndScans();
+        trackEvent('deliveries_deleted', {
+            scope: 'all',
+        }, 'warning');
     });
     
     return () => {

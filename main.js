@@ -6,6 +6,12 @@ import {
     openCourierPage,
 } from './couriers.js';
 import { parseRawData, saveCourierAndDeliveries } from './deliveries.js';
+import {
+    captureException,
+    initLogger,
+    setContext as setLoggerContext,
+    trackEvent,
+} from './logger.js';
 import { createScannerController } from './scanner.js';
 import { createUiController } from './ui.js';
 
@@ -146,12 +152,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const THEME_STORAGE_KEY = 'appTheme';
-    const APP_VERSION = 'v1.6.2.6';
-    const THEMES = ['blue', 'dark'];
+    const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
+    const APP_VERSION = 'v1.8.2.5';
+    const LOGS_PAGE_PASSWORD_HASH =
+        '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
+    const LOGS_ACCESS_STORAGE_KEY = 'logsPageAccessGranted';
+    const THEMES = ['light', 'blue', 'dark'];
     const THEME_BROWSER_COLORS = {
+        light: '#e8e8e8',
         blue: '#3949AB',
         dark: '#141414',
     };
+    const BUTTON_PALETTES = ['default', 'pink', 'platinum', 'gold', 'white'];
     let cameraMenuVisible = false;
     let activeCameraPickerModal = null;
     let activeBottomNavKey = 'home';
@@ -194,7 +206,91 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.dataset.theme = resolvedTheme;
         localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
         syncBrowserThemeColor(resolvedTheme);
+        setLoggerContext({ theme: resolvedTheme });
         return resolvedTheme;
+    }
+
+    function applyButtonPalette(paletteName) {
+        const resolvedPalette = BUTTON_PALETTES.includes(paletteName) ? paletteName : 'default';
+
+        if (resolvedPalette === 'default') {
+            delete document.documentElement.dataset.buttonPalette;
+            delete document.body.dataset.buttonPalette;
+            localStorage.removeItem(BUTTON_PALETTE_STORAGE_KEY);
+        } else {
+            document.documentElement.dataset.buttonPalette = resolvedPalette;
+            document.body.dataset.buttonPalette = resolvedPalette;
+            localStorage.setItem(BUTTON_PALETTE_STORAGE_KEY, resolvedPalette);
+        }
+
+        setLoggerContext({ buttonPalette: resolvedPalette });
+        return resolvedPalette;
+    }
+
+    function detectRuntimeContext() {
+        const ua = navigator.userAgent || '';
+        const platformHint = (
+            navigator.userAgentData?.platform
+            || navigator.platform
+            || ''
+        ).toLowerCase();
+        const maxTouchPoints = navigator.maxTouchPoints || 0;
+        const isTouch = maxTouchPoints > 0 || 'ontouchstart' in window;
+        const smallestViewport = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+        const largestViewport = Math.max(window.innerWidth || 0, window.innerHeight || 0);
+
+        let os = 'unknown';
+
+        if (/iphone|ipad|ipod/.test(ua) || (platformHint === 'macintel' && maxTouchPoints > 1)) {
+            os = 'ios';
+        } else if (/android/.test(ua)) {
+            os = 'android';
+        } else if (platformHint.includes('win') || /windows/i.test(ua)) {
+            os = 'windows';
+        } else if (platformHint.includes('mac') || /mac os/i.test(ua)) {
+            os = 'macos';
+        } else if (platformHint.includes('linux') || /linux/i.test(ua)) {
+            os = 'linux';
+        }
+
+        let browser = 'unknown';
+
+        if (/edg\//i.test(ua)) {
+            browser = 'edge';
+        } else if (/opr\//i.test(ua) || /opera/i.test(ua)) {
+            browser = 'opera';
+        } else if (/firefox\//i.test(ua) || /fxios/i.test(ua)) {
+            browser = 'firefox';
+        } else if (/crios\//i.test(ua) || /chrome\//i.test(ua)) {
+            browser = 'chrome';
+        } else if (/safari/i.test(ua) && !/chrome|crios|android/i.test(ua)) {
+            browser = 'safari';
+        }
+
+        let deviceType = 'desktop';
+
+        if (
+            /ipad|tablet/i.test(ua)
+            || (os === 'ios' && !/iphone/i.test(ua) && isTouch)
+            || (isTouch && smallestViewport >= 600 && largestViewport >= 800)
+        ) {
+            deviceType = 'tablet';
+        } else if (/mobi|iphone|ipod|android/i.test(ua) || (isTouch && smallestViewport < 600)) {
+            deviceType = 'mobile';
+        }
+
+        return {
+            browser,
+            deviceType,
+            isTouch,
+            os,
+            pixelRatio: window.devicePixelRatio || 1,
+            platform: deviceType,
+            url: window.location.href || 'unknown',
+            userAgent: ua || 'unknown',
+            viewport: `${window.innerWidth || 0}x${window.innerHeight || 0}`,
+            visibilityState: document.visibilityState || 'unknown',
+        };
     }
 
     function getBottomNavDirection(targetKey) {
@@ -234,6 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dom.bottomNav?.style.setProperty('--nav-active-index', String(Math.max(bottomNavOrder.indexOf(activeKey), 0)));
         dom.bottomNav?.setAttribute('data-nav-active', activeKey);
         setHomeChromeVisible(activeKey === 'home');
+        setLoggerContext({ screen: activeKey });
     }
 
     function setHomeChromeVisible(isVisible) {
@@ -526,6 +623,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            trackEvent('manual_submit_invalid', {
+                inputLength: transferId.length,
+                source: 'manual_submit',
+            }, 'warning');
             ui.showScanResult('error', 'Неверный формат ID', '', '', '');
         } finally {
             manualSubmitInFlight = false;
@@ -597,6 +698,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             ({ courierName, deliveryIds } = parseRawData(rawData));
         } catch (error) {
+            captureException(error, {
+                operation: 'save_raw_data_parse',
+                screen: state.activeRootScreen,
+                tags: {
+                    scope: 'data_entry',
+                },
+            });
             ui.showScanResult('error', 'Ошибка разбора данных', '', '', '');
             return false;
         }
@@ -613,6 +721,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await saveCourierAndDeliveries(service, courierName, deliveryIds);
+            trackEvent('courier_saved', {
+                courierName,
+                deliveryCount: deliveryIds.length,
+            });
             ui.showScanResult(
                 'success',
                 '',
@@ -622,7 +734,15 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             return true;
         } catch (error) {
-            console.error('Ошибка сохранения данных:', error);
+            captureException(error, {
+                courierName,
+                deliveryCount: deliveryIds.length,
+                operation: 'save_raw_data',
+                screen: state.activeRootScreen,
+                tags: {
+                    scope: 'data_entry',
+                },
+            });
             ui.showScanResult(
                 'error',
                 'Ошибка при сохранении',
@@ -698,6 +818,13 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 ({ courierName, deliveryIds } = parseRawData(rawData));
             } catch (error) {
+                captureException(error, {
+                    operation: 'sidebar_parse_raw_data',
+                    screen: state.activeRootScreen,
+                    tags: {
+                        scope: 'sidebar',
+                    },
+                });
                 ui.showScanResult('error', 'Ошибка разбора данных', '', '', '');
                 return;
             }
@@ -715,6 +842,11 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 await saveCourierAndDeliveries(service, courierName, deliveryIds);
                 dom.sidebarDataInput.value = '';
+                trackEvent('courier_saved', {
+                    courierName,
+                    deliveryCount: deliveryIds.length,
+                    source: 'sidebar',
+                });
                 ui.showScanResult(
                     'success',
                     '',
@@ -723,7 +855,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     '',
                 );
             } catch (error) {
-                console.error('Ошибка сохранения данных:', error);
+                captureException(error, {
+                    courierName,
+                    deliveryCount: deliveryIds.length,
+                    operation: 'sidebar_save_raw_data',
+                    screen: state.activeRootScreen,
+                    tags: {
+                        scope: 'sidebar',
+                    },
+                });
                 ui.showScanResult(
                     'error',
                     'Ошибка при сохранении',
@@ -1019,6 +1159,467 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }
 
+    function hasLogsAccess() {
+        try {
+            return sessionStorage.getItem(LOGS_ACCESS_STORAGE_KEY) === '1';
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function setLogsAccessGranted(isGranted) {
+        try {
+            if (isGranted) {
+                sessionStorage.setItem(LOGS_ACCESS_STORAGE_KEY, '1');
+                return;
+            }
+
+            sessionStorage.removeItem(LOGS_ACCESS_STORAGE_KEY);
+        } catch (error) {}
+    }
+
+    function formatLogTimestamp(timestamp) {
+        if (!timestamp) {
+            return 'Без времени';
+        }
+
+        try {
+            return new Date(timestamp).toLocaleString('ru-RU', {
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                month: '2-digit',
+                second: '2-digit',
+                year: 'numeric',
+            });
+        } catch (error) {
+            return String(timestamp);
+        }
+    }
+
+    function formatLogValue(value) {
+        if (value == null || value === '') {
+            return '—';
+        }
+
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return '[object]';
+            }
+        }
+
+        return String(value);
+    }
+
+    const LOG_FIELD_LABELS = {
+        appVersion: 'Версия',
+        browser: 'Браузер',
+        buttonPalette: 'Палитра',
+        cameraCount: 'Камер доступно',
+        cameraLabel: 'Камера',
+        column: 'Колонка',
+        deviceType: 'Тип устройства',
+        errorMessage: 'Текст ошибки',
+        errorName: 'Ошибка',
+        hasStream: 'Поток активен',
+        inputLength: 'Длина ввода',
+        isTouch: 'Сенсорный ввод',
+        level: 'Уровень',
+        line: 'Строка',
+        message: 'Сообщение',
+        online: 'Онлайн',
+        operation: 'Операция',
+        os: 'ОС',
+        pixelRatio: 'Pixel ratio',
+        platform: 'Платформа',
+        previousSelectedCameraId: 'Предыдущая камера',
+        reason: 'Причина',
+        restartIfActive: 'Перезапуск при активной камере',
+        scannerActive: 'Сканер активен',
+        scannerStarting: 'Сканер запускается',
+        screen: 'Экран',
+        selectedCameraId: 'Выбранная камера',
+        session: 'Сессия',
+        sessionId: 'Сессия',
+        source: 'Источник',
+        stack: 'Стек',
+        stopReason: 'Причина остановки',
+        theme: 'Тема',
+        time: 'Время',
+        timestamp: 'Время',
+        type: 'Событие',
+        url: 'URL',
+        userAgent: 'User-Agent',
+        viewport: 'Viewport',
+        visibility: 'Видимость',
+        visibilityState: 'Видимость',
+    };
+
+    const LOG_LEVEL_LABELS = {
+        error: 'Ошибка',
+        info: 'Инфо',
+        success: 'Успех',
+        warning: 'Предупреждение',
+    };
+
+    const LOG_TYPE_LABELS = {
+        all_data_deleted: 'Все данные удалены',
+        camera_changed: 'Камера изменена',
+        camera_permission_denied: 'Доступ к камере запрещён',
+        camera_start_failed: 'Ошибка запуска камеры',
+        courier_deleted: 'Курьер удалён',
+        courier_saved: 'Курьер сохранён',
+        deliveries_deleted: 'Передачи удалены',
+        delivery_not_found: 'Передача не найдена',
+        exception: 'Исключение',
+        log_message: 'Сообщение лога',
+        manual_submit_invalid: 'Неверный ввод ID',
+    };
+
+    function translateLogLabel(key) {
+        return LOG_FIELD_LABELS[key] || key;
+    }
+
+    function translateLogLevel(level) {
+        return LOG_LEVEL_LABELS[level] || level || 'Инфо';
+    }
+
+    function translateLogType(type) {
+        return LOG_TYPE_LABELS[type] || type || 'Событие';
+    }
+
+    async function hashLogsPassword(value) {
+        const normalizedValue = String(value || '').trim();
+
+        if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') {
+            return normalizedValue;
+        }
+
+        const bytes = new TextEncoder().encode(normalizedValue);
+        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+
+        return Array.from(new Uint8Array(digest))
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
+    }
+
+    function createLogMetaRows(meta = {}) {
+        const entries = Object.entries(meta || {}).filter(([, value]) => value !== undefined);
+
+        if (entries.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'logs-entry-empty';
+            empty.textContent = 'Без дополнительных данных';
+            return [empty];
+        }
+
+        return entries.map(([key, value]) => {
+            const row = document.createElement('div');
+            row.className = 'logs-entry-meta-row';
+
+            const keyNode = document.createElement('span');
+            keyNode.className = 'logs-entry-meta-key';
+            keyNode.textContent = translateLogLabel(key);
+
+            const valueNode = document.createElement('span');
+            valueNode.className = 'logs-entry-meta-value';
+            valueNode.textContent = formatLogValue(value);
+
+            row.appendChild(keyNode);
+            row.appendChild(valueNode);
+            return row;
+        });
+    }
+
+    function buildLogCopyText(eventItem) {
+        const lines = [
+            `${translateLogLabel('type')}: ${translateLogType(eventItem.type)}`,
+            `${translateLogLabel('level')}: ${translateLogLevel(eventItem.level)}`,
+            `${translateLogLabel('screen')}: ${eventItem.screen || 'unknown'}`,
+            `${translateLogLabel('platform')}: ${eventItem.platform || 'unknown'}`,
+            `${translateLogLabel('os')}: ${eventItem.os || 'unknown'}`,
+            `${translateLogLabel('browser')}: ${eventItem.browser || 'unknown'}`,
+            `${translateLogLabel('deviceType')}: ${eventItem.deviceType || 'unknown'}`,
+            `${translateLogLabel('isTouch')}: ${String(Boolean(eventItem.isTouch))}`,
+            `${translateLogLabel('viewport')}: ${eventItem.viewport || 'unknown'}`,
+            `${translateLogLabel('pixelRatio')}: ${eventItem.pixelRatio ?? 'unknown'}`,
+            `${translateLogLabel('visibility')}: ${eventItem.visibilityState || 'unknown'}`,
+            `${translateLogLabel('time')}: ${formatLogTimestamp(eventItem.timestamp)}`,
+            `${translateLogLabel('session')}: ${eventItem.sessionId || 'unknown'}`,
+        ];
+
+        Object.entries(eventItem.meta || {}).forEach(([key, value]) => {
+            lines.push(`${translateLogLabel(key)}: ${formatLogValue(value)}`);
+        });
+
+        return lines.join('\n');
+    }
+
+    async function copyLogText(text) {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+            return document.execCommand('copy');
+        } finally {
+            textarea.remove();
+        }
+    }
+
+    function createLogEntry(eventItem) {
+        const item = document.createElement('article');
+        item.className = 'logs-entry';
+        item.classList.add(`is-${eventItem.level || 'info'}`);
+
+        const header = document.createElement('div');
+        header.className = 'logs-entry-header';
+
+        const titleWrap = document.createElement('div');
+        titleWrap.className = 'logs-entry-title-wrap';
+
+        const typeNode = document.createElement('div');
+        typeNode.className = 'logs-entry-type';
+        typeNode.textContent = translateLogType(eventItem.type);
+
+        const subtitleNode = document.createElement('div');
+        subtitleNode.className = 'logs-entry-subtitle';
+        subtitleNode.textContent = `${translateLogLevel(eventItem.level)} • ${eventItem.screen || 'unknown'} • ${eventItem.os || 'unknown'}/${eventItem.browser || 'unknown'}`;
+
+        const timeNode = document.createElement('div');
+        timeNode.className = 'logs-entry-time';
+        timeNode.textContent = formatLogTimestamp(eventItem.timestamp);
+
+        const copyButton = document.createElement('button');
+        copyButton.type = 'button';
+        copyButton.className = 'logs-entry-copy-button';
+        copyButton.textContent = 'Копировать';
+        copyButton.addEventListener('click', () => {
+            void copyLogText(buildLogCopyText(eventItem))
+                .then((isCopied) => {
+                    ui.showToast(
+                        isCopied ? 'Лог скопирован' : 'Не удалось скопировать лог',
+                        {
+                            duration: 1600,
+                            type: isCopied ? 'success' : 'error',
+                        },
+                    );
+                })
+                .catch(() => {
+                    ui.showToast('Не удалось скопировать лог', {
+                        duration: 1600,
+                        type: 'error',
+                    });
+                });
+        });
+
+        const sessionNode = document.createElement('div');
+        sessionNode.className = 'logs-entry-session';
+        sessionNode.textContent = `session ${String(eventItem.sessionId || 'unknown').slice(0, 8)}`;
+
+        const metaBlock = document.createElement('div');
+        metaBlock.className = 'logs-entry-meta';
+        createLogMetaRows(eventItem.meta).forEach((row) => {
+            metaBlock.appendChild(row);
+        });
+
+        titleWrap.appendChild(typeNode);
+        titleWrap.appendChild(subtitleNode);
+        header.appendChild(titleWrap);
+        const actionsWrap = document.createElement('div');
+        actionsWrap.className = 'logs-entry-actions';
+        actionsWrap.appendChild(timeNode);
+        actionsWrap.appendChild(copyButton);
+        header.appendChild(actionsWrap);
+        item.appendChild(header);
+        item.appendChild(sessionNode);
+        item.appendChild(metaBlock);
+
+        return item;
+    }
+
+    function openLogsPagePanel(options = {}) {
+        setActiveBottomNav('settings');
+        let unsubscribeTelemetry = null;
+
+        const page = ui.showAppPage({
+            bodyClassName: 'logs-screen',
+            direction: options.direction,
+            onClose: () => {
+                unsubscribeTelemetry?.();
+            },
+            pageId: 'logsPage',
+            title: 'Логи',
+        });
+
+        const layout = document.createElement('div');
+        layout.className = 'logs-page-layout';
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'logs-toolbar';
+
+        const backButton = ui.createSecondaryButton('Назад к настройкам', {
+            className: 'logs-back-button',
+        });
+        backButton.addEventListener('click', () => {
+            openSettingsPagePanel({
+                direction: 'backward',
+            });
+        });
+
+        const lockButton = ui.createSecondaryButton('Закрыть доступ', {
+            className: 'logs-lock-button',
+        });
+        lockButton.addEventListener('click', () => {
+            setLogsAccessGranted(false);
+            ui.showToast('Доступ к логам закрыт', {
+                duration: 1800,
+            });
+            openSettingsPagePanel({
+                direction: 'backward',
+            });
+        });
+
+        const list = document.createElement('div');
+        list.className = 'logs-list';
+
+        const setLogsPlaceholder = (text) => {
+            list.innerHTML = '';
+            const placeholder = document.createElement('div');
+            placeholder.className = 'logs-placeholder';
+            placeholder.textContent = text;
+            list.appendChild(placeholder);
+        };
+
+        const renderLogs = (items) => {
+            list.innerHTML = '';
+
+            if (!Array.isArray(items) || items.length === 0) {
+                setLogsPlaceholder('Логи пока не найдены');
+                return;
+            }
+
+            items.forEach((eventItem) => {
+                list.appendChild(createLogEntry(eventItem));
+            });
+        };
+
+        toolbar.appendChild(backButton);
+        toolbar.appendChild(lockButton);
+        layout.appendChild(toolbar);
+        layout.appendChild(list);
+        page.body.appendChild(layout);
+        setLogsPlaceholder('Загрузка логов...');
+
+        if (typeof service.subscribeTelemetryEvents === 'function') {
+            unsubscribeTelemetry = service.subscribeTelemetryEvents(
+                (items) => {
+                    renderLogs(items);
+                },
+                () => {
+                    setLogsPlaceholder('Нет доступа к telemetry_events');
+                },
+            );
+            return;
+        }
+
+        void service.getTelemetryEvents()
+            .then((items) => {
+                renderLogs(items);
+            })
+            .catch(() => {
+                setLogsPlaceholder('Нет доступа к telemetry_events');
+            });
+    }
+
+    function openLogsPasswordModal() {
+        const modal = ui.createModal({
+            className: 'data-entry-modal-content',
+            maxButtonWidth: 420,
+        });
+        modal.content.classList.add('logs-password-modal');
+
+        const title = document.createElement('div');
+        title.className = 'data-entry-modal-title';
+        title.textContent = 'Доступ к логам';
+
+        const description = document.createElement('div');
+        description.className = 'logs-password-description';
+        description.textContent = 'Введите пароль для открытия страницы логов';
+
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.inputMode = 'numeric';
+        input.autocomplete = 'current-password';
+        input.className = 'logs-password-input';
+        input.placeholder = 'Пароль';
+
+        const submitButton = ui.createPrimaryButton('Открыть логи', {
+            className: 'logs-password-submit',
+        });
+        const cancelButton = ui.createSecondaryButton('Отмена', {
+            className: 'logs-password-cancel',
+        });
+
+        const submit = async () => {
+            submitButton.disabled = true;
+            const passwordHash = await hashLogsPassword(input.value);
+
+            if (passwordHash !== LOGS_PAGE_PASSWORD_HASH) {
+                submitButton.disabled = false;
+                input.value = '';
+                ui.showToast('Неверный пароль', {
+                    type: 'error',
+                    duration: 1800,
+                });
+                input.focus();
+                return;
+            }
+
+            setLogsAccessGranted(true);
+            modal.close();
+            openLogsPagePanel({
+                direction: 'forward',
+            });
+        };
+
+        submitButton.addEventListener('click', () => {
+            void submit();
+        });
+        cancelButton.addEventListener('click', modal.close);
+        input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            event.preventDefault();
+            void submit();
+        });
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(description);
+        modal.content.appendChild(input);
+        modal.content.appendChild(submitButton);
+        modal.content.appendChild(cancelButton);
+
+        window.setTimeout(() => {
+            input.focus();
+        }, 60);
+    }
+
     function openSettingsPagePanel(options = {}) {
         setActiveBottomNav('settings');
         const page = ui.showAppPage({
@@ -1080,6 +1681,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const themeRadioGroup = document.createElement('div');
         themeRadioGroup.className = 'theme-radio-group';
 
+        const lightThemeButton = document.createElement('button');
+        lightThemeButton.type = 'button';
+        lightThemeButton.className = 'theme-radio-button';
+        lightThemeButton.textContent = 'Светлая';
+
         const blueThemeButton = document.createElement('button');
         blueThemeButton.type = 'button';
         blueThemeButton.className = 'theme-radio-button';
@@ -1091,12 +1697,20 @@ document.addEventListener('DOMContentLoaded', () => {
         darkThemeButton.textContent = 'Темная';
 
         function syncThemeSelector(themeName) {
-            const isDark = themeName === 'dark';
-            blueThemeButton.classList.toggle('is-active', !isDark);
-            darkThemeButton.classList.toggle('is-active', isDark);
-            themeRadioGroup.style.setProperty('--theme-active-index', isDark ? '1' : '0');
-            themeRadioGroup.setAttribute('data-theme-preview', isDark ? 'dark' : 'blue');
+            const activeThemeName = THEMES.includes(themeName) ? themeName : 'blue';
+            lightThemeButton.classList.toggle('is-active', activeThemeName === 'light');
+            blueThemeButton.classList.toggle('is-active', activeThemeName === 'blue');
+            darkThemeButton.classList.toggle('is-active', activeThemeName === 'dark');
+            themeRadioGroup.style.setProperty(
+                '--theme-active-index',
+                String(Math.max(THEMES.indexOf(activeThemeName), 0)),
+            );
+            themeRadioGroup.setAttribute('data-theme-preview', activeThemeName);
         }
+
+        lightThemeButton.addEventListener('click', () => {
+            syncThemeSelector(applyTheme('light'));
+        });
 
         blueThemeButton.addEventListener('click', () => {
             syncThemeSelector(applyTheme('blue'));
@@ -1106,16 +1720,120 @@ document.addEventListener('DOMContentLoaded', () => {
             syncThemeSelector(applyTheme('dark'));
         });
 
+        themeRadioGroup.appendChild(lightThemeButton);
         themeRadioGroup.appendChild(blueThemeButton);
         themeRadioGroup.appendChild(darkThemeButton);
+
+        const paletteButton = ui.createPrimaryButton('Цвет кнопок', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            paletteButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 4.5C8.41015 4.5 5.5 7.41015 5.5 11C5.5 14.5899 8.41015 17.5 12 17.5C12.4661 17.5 12.9168 17.451 13.3508 17.3578C14.5846 17.0928 15.75 18.0281 15.75 19.29C15.75 19.9866 16.3143 20.5509 17.0109 20.5509H17.25C19.3211 20.5509 21 18.872 21 16.8009C21 9.95473 17.0453 4.5 12 4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M8.5 10.25C8.91421 10.25 9.25 9.91421 9.25 9.5C9.25 9.08579 8.91421 8.75 8.5 8.75C8.08579 8.75 7.75 9.08579 7.75 9.5C7.75 9.91421 8.08579 10.25 8.5 10.25Z" fill="currentColor"/>
+                    <path d="M11.75 8.25C12.1642 8.25 12.5 7.91421 12.5 7.5C12.5 7.08579 12.1642 6.75 11.75 6.75C11.3358 6.75 11 7.08579 11 7.5C11 7.91421 11.3358 8.25 11.75 8.25Z" fill="currentColor"/>
+                    <path d="M15.25 9.75C15.6642 9.75 16 9.41421 16 9C16 8.58579 15.6642 8.25 15.25 8.25C14.8358 8.25 14.5 8.58579 14.5 9C14.5 9.41421 14.8358 9.75 15.25 9.75Z" fill="currentColor"/>
+                    <path d="M10.25 13.75C10.6642 13.75 11 13.4142 11 13C11 12.5858 10.6642 12.25 10.25 12.25C9.83579 12.25 9.5 12.5858 9.5 13C9.5 13.4142 9.83579 13.75 10.25 13.75Z" fill="currentColor"/>
+                </svg>
+            `,
+            'Цвет кнопок'
+        );
+        paletteButton.setAttribute('aria-expanded', 'false');
+
+        const paletteSelector = document.createElement('div');
+        paletteSelector.className = 'theme-selector button-palette-selector';
+
+        const buttonPaletteGrid = document.createElement('div');
+        buttonPaletteGrid.className = 'button-palette-grid';
+
+        const paletteOptions = [
+            {
+                key: 'default',
+                label: 'По умолчанию',
+                previewClassName: 'is-default',
+            },
+            {
+                key: 'pink',
+                label: 'Розовый',
+                previewClassName: 'is-pink',
+            },
+            {
+                key: 'platinum',
+                label: 'Платина',
+                previewClassName: 'is-platinum',
+            },
+            {
+                key: 'gold',
+                label: 'Золото',
+                previewClassName: 'is-gold',
+            },
+            {
+                key: 'white',
+                label: 'Белый',
+                previewClassName: 'is-white',
+            },
+        ];
+
+        const paletteButtons = new Map();
+
+        function syncButtonPaletteSelector(paletteName) {
+            const activePaletteName =
+                BUTTON_PALETTES.includes(paletteName) ? paletteName : 'default';
+
+            paletteButtons.forEach((button, key) => {
+                button.classList.toggle('is-active', key === activePaletteName);
+            });
+        }
+
+        paletteOptions.forEach((paletteOption) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'button-palette-option';
+            button.dataset.palette = paletteOption.key;
+
+            const swatch = document.createElement('span');
+            swatch.className = `button-palette-option-swatch ${paletteOption.previewClassName}`;
+            swatch.setAttribute('aria-hidden', 'true');
+
+            const text = document.createElement('span');
+            text.className = 'button-palette-option-label';
+            text.textContent = paletteOption.label;
+
+            button.appendChild(swatch);
+            button.appendChild(text);
+            button.addEventListener('click', () => {
+                syncButtonPaletteSelector(applyButtonPalette(paletteOption.key));
+            });
+
+            paletteButtons.set(paletteOption.key, button);
+            buttonPaletteGrid.appendChild(button);
+        });
+
         themeSelector.appendChild(themeRadioGroup);
+        paletteSelector.appendChild(buttonPaletteGrid);
+
+        function setPaletteSelectorOpen(isOpen) {
+            paletteSelector.classList.toggle('is-open', isOpen);
+            paletteButton.classList.toggle('is-open', isOpen);
+            paletteButton.setAttribute('aria-expanded', String(isOpen));
+        }
 
         themeButton.addEventListener('click', () => {
             setCameraSelectorOpen(false);
+            setPaletteSelectorOpen(false);
             themeSelector.classList.toggle('is-open');
         });
 
+        paletteButton.addEventListener('click', () => {
+            setCameraSelectorOpen(false);
+            themeSelector.classList.remove('is-open');
+            setPaletteSelectorOpen(!paletteSelector.classList.contains('is-open'));
+        });
+
         syncThemeSelector(document.body.dataset.theme || 'blue');
+        syncButtonPaletteSelector(document.body.dataset.buttonPalette || 'default');
 
         const cameraButton = ui.createPrimaryButton('Выбор камеры', {
             className: 'data-entry-submit-button',
@@ -1134,12 +1852,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const cameraChevron = cameraButton.querySelector('.settings-panel-button-spacer');
         if (cameraChevron) {
-            cameraChevron.classList.add('settings-panel-button-chevron');
-            cameraChevron.innerHTML = `
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            `;
+            cameraChevron.innerHTML = '';
         }
 
         const cameraSelector = document.createElement('div');
@@ -1147,14 +1860,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const cameraSelectorContent = document.createElement('div');
         cameraSelectorContent.className = 'camera-picker-inline-content';
 
-        const cameraSelectorDescription = document.createElement('div');
-        cameraSelectorDescription.className = 'camera-picker-inline-description';
-        cameraSelectorDescription.textContent = 'Выберите камеру для сканирования';
-
         const cameraSelectorList = document.createElement('div');
         cameraSelectorList.className = 'camera-picker-list';
 
-        cameraSelectorContent.appendChild(cameraSelectorDescription);
         cameraSelectorContent.appendChild(cameraSelectorList);
         cameraSelector.appendChild(cameraSelectorContent);
 
@@ -1170,11 +1878,12 @@ document.addEventListener('DOMContentLoaded', () => {
             cameraSelectorList.innerHTML = '';
 
             if (!Array.isArray(cameras) || cameras.length === 0) {
-                cameraSelectorDescription.textContent = 'Камеры не найдены';
+                const emptyState = document.createElement('div');
+                emptyState.className = 'camera-picker-inline-empty';
+                emptyState.textContent = 'Камеры не найдены';
+                cameraSelectorList.appendChild(emptyState);
                 return false;
             }
-
-            cameraSelectorDescription.textContent = 'Выберите камеру для сканирования';
 
             const typeCounters = {};
 
@@ -1232,6 +1941,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const willOpen = !cameraSelector.classList.contains('is-open');
 
             themeSelector.classList.remove('is-open');
+            setPaletteSelectorOpen(false);
 
             if (!willOpen) {
                 setCameraSelectorOpen(false);
@@ -1242,10 +1952,44 @@ document.addEventListener('DOMContentLoaded', () => {
             setCameraSelectorOpen(hasCameras);
         });
 
+        const logsButton = ui.createPrimaryButton('Логи', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            logsButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 5.5H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M7 10.5H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M7 15.5H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M6 3.5H18C19.1046 3.5 20 4.39543 20 5.5V18.5C20 19.6046 19.1046 20.5 18 20.5H6C4.89543 20.5 4 19.6046 4 18.5V5.5C4 4.39543 4.89543 3.5 6 3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+            `,
+            'Логи'
+        );
+
+        logsButton.addEventListener('click', () => {
+            themeSelector.classList.remove('is-open');
+            setPaletteSelectorOpen(false);
+            setCameraSelectorOpen(false);
+
+            if (hasLogsAccess()) {
+                openLogsPagePanel({
+                    direction: 'forward',
+                });
+                return;
+            }
+
+            openLogsPasswordModal();
+        });
+
         card.appendChild(themeButton);
         card.appendChild(themeSelector);
+        card.appendChild(paletteButton);
+        card.appendChild(paletteSelector);
         card.appendChild(cameraButton);
         card.appendChild(cameraSelector);
+        card.appendChild(logsButton);
         page.body.appendChild(card);
 
         const versionNote = document.createElement('div');
@@ -1420,6 +2164,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'blue');
+    applyButtonPalette(localStorage.getItem(BUTTON_PALETTE_STORAGE_KEY) || 'default');
+    const runtimeContext = detectRuntimeContext();
+    initLogger({
+        appVersion: APP_VERSION,
+        buttonPalette: document.documentElement.dataset.buttonPalette || 'default',
+        browser: runtimeContext.browser,
+        deviceType: runtimeContext.deviceType,
+        isIOS: IS_IOS,
+        isTouch: runtimeContext.isTouch,
+        online: navigator.onLine,
+        os: runtimeContext.os,
+        pixelRatio: runtimeContext.pixelRatio,
+        platform: runtimeContext.platform,
+        screen: activeBottomNavKey,
+        selectedCameraId: state.selectedCameraId || 'none',
+        theme: document.documentElement.dataset.theme || 'blue',
+        url: runtimeContext.url,
+        userAgent: runtimeContext.userAgent,
+        viewport: runtimeContext.viewport,
+        visibilityState: runtimeContext.visibilityState,
+    });
     setActiveBottomNav('home');
 
     const scheduleAdminWarmup =

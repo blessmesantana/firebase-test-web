@@ -1,4 +1,8 @@
 import { findMatchingDeliveries } from './deliveries.js';
+import {
+    captureException,
+    trackEvent,
+} from './logger.js';
 
 export function createScannerController({
     state,
@@ -49,6 +53,14 @@ export function createScannerController({
 
             if (!matchedResult.cleanedId) {
                 ui.showScanResult('error', 'Неверный формат QR', '', '', '');
+                trackEvent(
+                    'manual_submit_invalid',
+                    {
+                        inputLength: String(transferId || '').length,
+                        source: options.resumeAfterSelection ? 'scan' : 'manual',
+                    },
+                    'warning',
+                );
                 return {
                     status: 'invalid',
                 };
@@ -56,6 +68,10 @@ export function createScannerController({
 
             if (matchedResult.matches.length === 0) {
                 ui.showScanResult('not_found', matchedResult.cleanedId);
+                trackEvent('delivery_not_found', {
+                    source: options.resumeAfterSelection ? 'scan' : 'manual',
+                    transferId: matchedResult.cleanedId,
+                });
                 return {
                     status: 'not_found',
                     cleanedId: matchedResult.cleanedId,
@@ -80,6 +96,14 @@ export function createScannerController({
             };
         } catch (error) {
             console.error('Ошибка при поиске передачи:', error);
+            captureException(error, {
+                operation: 'process_transfer_id',
+                source: options.resumeAfterSelection ? 'scan' : 'manual',
+                transferId: transferId || '',
+                tags: {
+                    scope: 'scanner',
+                },
+            });
             ui.showScanResult('error', 'Ошибка при поиске', '', '', '');
 
             return {
