@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.8.2.5';
+    const APP_VERSION = 'v1.8.2.6';
     const LOGS_PAGE_PASSWORD_HASH =
         '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
     const LOGS_ACCESS_STORAGE_KEY = 'logsPageAccessGranted';
@@ -241,9 +241,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let os = 'unknown';
 
-        if (/iphone|ipad|ipod/.test(ua) || (platformHint === 'macintel' && maxTouchPoints > 1)) {
+        if (/iphone|ipad|ipod/i.test(ua) || (platformHint === 'macintel' && maxTouchPoints > 1)) {
             os = 'ios';
-        } else if (/android/.test(ua)) {
+        } else if (/android/i.test(ua)) {
             os = 'android';
         } else if (platformHint.includes('win') || /windows/i.test(ua)) {
             os = 'windows';
