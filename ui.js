@@ -1,6 +1,21 @@
 ﻿function applyStyles(element, styles) {
     Object.assign(element.style, styles);
 }
+function addClassNames(element, className) {
+    if (!element || !className) {
+        return;
+    }
+
+    const classNames = Array.isArray(className)
+        ? className
+        : String(className).split(/\s+/);
+
+    const normalizedClassNames = classNames.filter(Boolean);
+
+    if (normalizedClassNames.length > 0) {
+        element.classList.add(...normalizedClassNames);
+    }
+}
 
 export function createUiController({ dom }) {
     const APP_PAGE_TRANSITION_MS = 320;
@@ -338,9 +353,7 @@ export function createUiController({ dom }) {
             button.textContent = options.label;
         }
 
-        if (options.className) {
-            button.classList.add(options.className);
-        }
+        addClassNames(button, options.className);
 
         return button;
     }
@@ -364,9 +377,7 @@ export function createUiController({ dom }) {
             cursor: 'pointer',
         });
 
-        if (options.className) {
-            button.classList.add(options.className);
-        }
+        addClassNames(button, options.className);
 
         return button;
     }
@@ -388,9 +399,7 @@ export function createUiController({ dom }) {
             cursor: 'pointer',
         });
 
-        if (options.className) {
-            button.classList.add(options.className);
-        }
+        addClassNames(button, options.className);
 
         return button;
     }
@@ -441,9 +450,7 @@ export function createUiController({ dom }) {
             overflowY: 'auto',
         });
 
-        if (options.className) {
-            content.classList.add(options.className);
-        }
+        addClassNames(content, options.className);
 
         const syncWidth = () => {
             setModalContentWidth(content, {
