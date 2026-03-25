@@ -782,30 +782,25 @@ export async function openArchivePage({ ui, direction }) {
         const item = document.createElement('div');
         item.className = 'shk-accordion';
 
-        const button = document.createElement('button');
+        const button = ui.createPrimaryButton('', {
+            className: 'data-entry-submit-button',
+        });
         button.type = 'button';
-        button.className = 'app-page-list-button shk-accordion-button';
+        button.classList.add('settings-panel-button', 'shk-accordion-button');
         button.setAttribute('aria-expanded', 'false');
 
-        const label = document.createElement('span');
-        label.className = 'shk-accordion-label';
-
         const icon = document.createElement('span');
-        icon.className = 'shk-accordion-icon';
+        icon.className = 'settings-panel-button-icon shk-accordion-icon';
         icon.setAttribute('aria-hidden', 'true');
         icon.innerHTML = getShkSectionIconMarkup(section.id);
 
         const labelText = document.createElement('span');
-        labelText.className = 'shk-accordion-label-text';
+        labelText.className = 'settings-panel-button-label shk-accordion-label-text';
         labelText.textContent = section.title;
 
-        label.appendChild(icon);
-        label.appendChild(labelText);
-
-        const chevron = document.createElement('span');
-        chevron.className = 'shk-accordion-chevron';
-        chevron.setAttribute('aria-hidden', 'true');
-        chevron.innerHTML = '<svg width="14" height="9" viewBox="0 0 14 9" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1.5L7 7.5L13 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        const spacer = document.createElement('span');
+        spacer.className = 'settings-panel-button-spacer shk-accordion-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
 
         const panel = document.createElement('div');
         panel.className = 'shk-accordion-panel';
@@ -848,8 +843,9 @@ export async function openArchivePage({ ui, direction }) {
         panelBody.appendChild(codesGrid);
         panelInner.appendChild(panelBody);
         panel.appendChild(panelInner);
-        button.appendChild(label);
-        button.appendChild(chevron);
+        button.appendChild(icon);
+        button.appendChild(labelText);
+        button.appendChild(spacer);
         item.appendChild(button);
         item.appendChild(panel);
         list.appendChild(item);
@@ -857,6 +853,7 @@ export async function openArchivePage({ ui, direction }) {
         button.addEventListener('click', () => {
             const isOpen = item.classList.contains('is-open');
             item.classList.toggle('is-open', !isOpen);
+            button.classList.toggle('is-open', !isOpen);
             button.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
             panel.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
         });

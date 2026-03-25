@@ -14,6 +14,7 @@ import {
 } from './logger.js';
 import { createScannerController } from './scanner.js';
 import { createUiController } from './ui.js';
+import { openWhatsNewPagePanel } from './whats-new.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const DEBUG_CAMERA = new URLSearchParams(window.location.search).has('debugCamera');
@@ -153,10 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.2.5';
-    const LOGS_PAGE_PASSWORD_HASH =
-        '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
-    const LOGS_ACCESS_STORAGE_KEY = 'logsPageAccessGranted';
+    const APP_VERSION = 'v1.9.3.0';
     const THEMES = ['light', 'blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         light: '#e8e8e8',
@@ -1159,25 +1157,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }
 
-    function hasLogsAccess() {
-        try {
-            return sessionStorage.getItem(LOGS_ACCESS_STORAGE_KEY) === '1';
-        } catch (error) {
-            return false;
-        }
-    }
-
-    function setLogsAccessGranted(isGranted) {
-        try {
-            if (isGranted) {
-                sessionStorage.setItem(LOGS_ACCESS_STORAGE_KEY, '1');
-                return;
-            }
-
-            sessionStorage.removeItem(LOGS_ACCESS_STORAGE_KEY);
-        } catch (error) {}
-    }
-
     function formatLogTimestamp(timestamp) {
         if (!timestamp) {
             return 'Без времени';
@@ -1288,21 +1267,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function translateLogType(type) {
         return LOG_TYPE_LABELS[type] || type || 'Событие';
-    }
-
-    async function hashLogsPassword(value) {
-        const normalizedValue = String(value || '').trim();
-
-        if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') {
-            return normalizedValue;
-        }
-
-        const bytes = new TextEncoder().encode(normalizedValue);
-        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
-
-        return Array.from(new Uint8Array(digest))
-            .map((byte) => byte.toString(16).padStart(2, '0'))
-            .join('');
     }
 
     function createLogMetaRows(meta = {}) {
@@ -1480,19 +1444,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        const lockButton = ui.createSecondaryButton('Закрыть доступ', {
-            className: 'logs-lock-button',
-        });
-        lockButton.addEventListener('click', () => {
-            setLogsAccessGranted(false);
-            ui.showToast('Доступ к логам закрыт', {
-                duration: 1800,
-            });
-            openSettingsPagePanel({
-                direction: 'backward',
-            });
-        });
-
         const list = document.createElement('div');
         list.className = 'logs-list';
 
@@ -1518,7 +1469,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         toolbar.appendChild(backButton);
-        toolbar.appendChild(lockButton);
         layout.appendChild(toolbar);
         layout.appendChild(list);
         page.body.appendChild(layout);
@@ -1543,81 +1493,6 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(() => {
                 setLogsPlaceholder('Нет доступа к telemetry_events');
             });
-    }
-
-    function openLogsPasswordModal() {
-        const modal = ui.createModal({
-            className: 'data-entry-modal-content',
-            maxButtonWidth: 420,
-        });
-        modal.content.classList.add('logs-password-modal');
-
-        const title = document.createElement('div');
-        title.className = 'data-entry-modal-title';
-        title.textContent = 'Доступ к логам';
-
-        const description = document.createElement('div');
-        description.className = 'logs-password-description';
-        description.textContent = 'Введите пароль для открытия страницы логов';
-
-        const input = document.createElement('input');
-        input.type = 'password';
-        input.inputMode = 'numeric';
-        input.autocomplete = 'current-password';
-        input.className = 'logs-password-input';
-        input.placeholder = 'Пароль';
-
-        const submitButton = ui.createPrimaryButton('Открыть логи', {
-            className: 'logs-password-submit',
-        });
-        const cancelButton = ui.createSecondaryButton('Отмена', {
-            className: 'logs-password-cancel',
-        });
-
-        const submit = async () => {
-            submitButton.disabled = true;
-            const passwordHash = await hashLogsPassword(input.value);
-
-            if (passwordHash !== LOGS_PAGE_PASSWORD_HASH) {
-                submitButton.disabled = false;
-                input.value = '';
-                ui.showToast('Неверный пароль', {
-                    type: 'error',
-                    duration: 1800,
-                });
-                input.focus();
-                return;
-            }
-
-            setLogsAccessGranted(true);
-            modal.close();
-            openLogsPagePanel({
-                direction: 'forward',
-            });
-        };
-
-        submitButton.addEventListener('click', () => {
-            void submit();
-        });
-        cancelButton.addEventListener('click', modal.close);
-        input.addEventListener('keydown', (event) => {
-            if (event.key !== 'Enter') {
-                return;
-            }
-
-            event.preventDefault();
-            void submit();
-        });
-
-        modal.content.appendChild(title);
-        modal.content.appendChild(description);
-        modal.content.appendChild(input);
-        modal.content.appendChild(submitButton);
-        modal.content.appendChild(cancelButton);
-
-        window.setTimeout(() => {
-            input.focus();
-        }, 60);
     }
 
     function openSettingsPagePanel(options = {}) {
@@ -1975,19 +1850,51 @@ document.addEventListener('DOMContentLoaded', () => {
             'Логи'
         );
 
+        const whatsNewButton = ui.createPrimaryButton('Что нового?', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            whatsNewButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 4V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M12 18V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M4 12H6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M18 12H20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M6.35 6.35L7.76 7.76" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M16.24 16.24L17.65 17.65" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M17.65 6.35L16.24 7.76" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M7.76 16.24L6.35 17.65" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    <path d="M12 9.25V12.25L14 13.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 17.5C15.0376 17.5 17.5 15.0376 17.5 12C17.5 8.96243 15.0376 6.5 12 6.5C8.96243 6.5 6.5 8.96243 6.5 12C6.5 15.0376 8.96243 17.5 12 17.5Z" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+            `,
+            'Что нового?'
+        );
+
         logsButton.addEventListener('click', () => {
             setThemeSelectorOpen(false);
             setPaletteSelectorOpen(false);
             setCameraSelectorOpen(false);
+            openLogsPagePanel({
+                direction: 'forward',
+            });
+        });
 
-            if (hasLogsAccess()) {
-                openLogsPagePanel({
-                    direction: 'forward',
-                });
-                return;
-            }
-
-            openLogsPasswordModal();
+        whatsNewButton.addEventListener('click', () => {
+            setThemeSelectorOpen(false);
+            setPaletteSelectorOpen(false);
+            setCameraSelectorOpen(false);
+            openWhatsNewPagePanel({
+                direction: 'forward',
+                onBack: () => {
+                    openSettingsPagePanel({
+                        direction: 'backward',
+                    });
+                },
+                setActiveBottomNav,
+                ui,
+            });
         });
 
         card.appendChild(themeButton);
@@ -1997,6 +1904,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(cameraButton);
         card.appendChild(cameraSelector);
         card.appendChild(logsButton);
+        card.appendChild(whatsNewButton);
         page.body.appendChild(card);
 
         const versionNote = document.createElement('div');
