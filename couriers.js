@@ -15,6 +15,7 @@ function appendEmptyState(target, text) {
     empty.textContent = text;
     empty.style.color = 'var(--color-text-secondary)';
     empty.style.fontSize = '13px';
+    empty.style.textAlign = 'center';
     target.appendChild(empty);
 }
 

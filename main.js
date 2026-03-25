@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.2.4';
+    const APP_VERSION = 'v1.9.2.5';
     const LOGS_PAGE_PASSWORD_HASH =
         '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
     const LOGS_ACCESS_STORAGE_KEY = 'logsPageAccessGranted';
