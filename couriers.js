@@ -296,9 +296,20 @@ async function toggleCourierAccordionItem({
     item.dataset.loaded = 'true';
 }
 
-function createCourierAccordionItem({ courierName, isComplete, page, service }) {
+function createCourierAccordionItem({
+    courierName,
+    isComplete,
+    isDeleteCandidate,
+    onToggleDeleteCandidate,
+    page,
+    service,
+}) {
     const item = document.createElement('div');
     item.className = 'courier-accordion';
+    item.dataset.courierName = courierName;
+
+    const header = document.createElement('div');
+    header.className = 'courier-accordion-header';
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -323,6 +334,24 @@ function createCourierAccordionItem({ courierName, isComplete, page, service }) 
     chevron.setAttribute('aria-hidden', 'true');
     chevron.innerHTML = '<svg width="14" height="9" viewBox="0 0 14 9" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1.5L7 7.5L13 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+    const selectButton = document.createElement('button');
+    selectButton.type = 'button';
+    selectButton.className = 'courier-accordion-select-button';
+    selectButton.setAttribute('aria-pressed', isDeleteCandidate ? 'true' : 'false');
+    selectButton.setAttribute(
+        'aria-label',
+        isDeleteCandidate
+            ? `Снять выбор курьера ${courierName}`
+            : `Выбрать курьера ${courierName} для удаления`,
+    );
+    selectButton.classList.toggle('is-selected', Boolean(isDeleteCandidate));
+
+    const selectIndicator = document.createElement('span');
+    selectIndicator.className = 'courier-accordion-select-indicator';
+    selectIndicator.setAttribute('aria-hidden', 'true');
+    selectIndicator.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M8 10V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 10V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    selectButton.appendChild(selectIndicator);
+
     const panel = document.createElement('div');
     panel.className = 'courier-accordion-panel';
     panel.setAttribute('aria-hidden', 'true');
@@ -338,20 +367,30 @@ function createCourierAccordionItem({ courierName, isComplete, page, service }) 
     button.appendChild(status);
     button.appendChild(label);
     button.appendChild(chevron);
-    item.appendChild(button);
+    header.appendChild(button);
+    header.appendChild(selectButton);
+    item.appendChild(header);
     item.appendChild(panel);
 
     item.button = button;
     item.panel = panel;
     item.panelBody = panelBody;
+    item.selectButton = selectButton;
 
     button.addEventListener('click', () => {
+        onToggleDeleteCandidate?.('');
         void toggleCourierAccordionItem({
             item,
             courierName,
             page,
             service,
         });
+    });
+
+    selectButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleDeleteCandidate?.(courierName);
     });
 
     return item;
@@ -361,6 +400,7 @@ export async function openCourierPage({ service, ui, direction }) {
     void service.warmAdminData?.();
 
     const page = ui.showAppPage({
+        bodyClassName: 'courier-screen',
         direction,
         onClose: () => {
             unsubscribeCouriers?.();
@@ -369,23 +409,103 @@ export async function openCourierPage({ service, ui, direction }) {
         title: 'Курьеры',
     });
     let unsubscribeCouriers = null;
+    let deleteCandidateCourier = '';
 
-    appendEmptyState(page.body, 'Загрузка...');
+    const layout = document.createElement('div');
+    layout.className = 'courier-page-layout';
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'courier-page-list-wrap';
+
+    const actions = document.createElement('div');
+    actions.className = 'archive-action-group';
+
+    const deleteCourierButton = ui.createPrimaryButton('Удалить курьера', {
+        className: 'archive-delete-courier-btn',
+    });
+    const deleteCourierDeliveriesButton = ui.createPrimaryButton(
+        'Удалить передачи',
+        {
+            className: 'archive-delete-btn',
+        },
+    );
+    const deleteAllCouriersButton = ui.createPrimaryButton(
+        'Удалить всех',
+        {
+            className: 'archive-delete-all-btn',
+        },
+    );
+
+    actions.appendChild(deleteCourierButton);
+    actions.appendChild(deleteCourierDeliveriesButton);
+    actions.appendChild(deleteAllCouriersButton);
+    layout.appendChild(listWrap);
+    layout.appendChild(actions);
+    page.body.appendChild(layout);
+
+    appendEmptyState(listWrap, 'Загрузка...');
+
+    async function refreshCourierList() {
+        try {
+            await renderCourierList(await getCourierNames(service));
+        } catch (error) {
+            console.error('Ошибка обновления курьеров:', error);
+            captureException(error, {
+                operation: 'refresh_courier_page',
+                tags: {
+                    scope: 'couriers',
+                },
+            });
+
+            if (!isPageHandleActive(page)) {
+                return;
+            }
+
+            listWrap.innerHTML = '';
+            appendEmptyState(listWrap, 'Не удалось обновить курьеров');
+        }
+    }
+
+    function toggleDeleteCandidate(courierName) {
+        deleteCandidateCourier =
+            deleteCandidateCourier === courierName ? '' : courierName;
+
+        if (!isPageHandleActive(page)) {
+            return;
+        }
+
+        listWrap.querySelectorAll('.courier-accordion').forEach((item) => {
+            const isSelected = item.dataset.courierName === deleteCandidateCourier;
+            item.selectButton?.classList.toggle('is-selected', isSelected);
+            item.selectButton?.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+            item.selectButton?.setAttribute(
+                'aria-label',
+                isSelected
+                    ? `Снять выбор курьера ${item.dataset.courierName}`
+                    : `Выбрать курьера ${item.dataset.courierName} для удаления`,
+            );
+        });
+    }
 
     async function renderCourierList(couriers) {
         if (!isPageHandleActive(page)) {
             return;
         }
 
-        page.body.innerHTML = '';
+        listWrap.innerHTML = '';
 
         if (couriers.length === 0) {
-            appendEmptyState(page.body, 'Курьеры не найдены');
+            deleteCandidateCourier = '';
+            appendEmptyState(listWrap, 'Курьеры не найдены');
             return;
         }
 
+        if (!couriers.includes(deleteCandidateCourier)) {
+            deleteCandidateCourier = '';
+        }
+
         const list = document.createElement('div');
-        list.className = 'app-page-list';
+        list.className = 'app-page-list archive-courier-list';
         let completedCourierNames = new Set();
 
         try {
@@ -410,14 +530,99 @@ export async function openCourierPage({ service, ui, direction }) {
         couriers.forEach((courierName) => {
             list.appendChild(createCourierAccordionItem({
                 courierName,
+                isDeleteCandidate: deleteCandidateCourier === courierName,
                 isComplete: completedCourierNames.has(courierName),
+                onToggleDeleteCandidate: toggleDeleteCandidate,
                 page,
                 service,
             }));
         });
 
-        page.body.appendChild(list);
+        listWrap.appendChild(list);
     }
+
+    deleteCourierButton.addEventListener('click', async () => {
+        if (!deleteCandidateCourier) {
+            ui.showScanResult('error', 'Выберите курьера для удаления');
+            return;
+        }
+
+        const selectedCourier = deleteCandidateCourier;
+        const confirmDialog = ui.createConfirmDialog({
+            html: `Вы действительно хотите удалить курьера <b style="font-size:16px;">${selectedCourier}</b>?`,
+            confirmText: 'Удалить курьера',
+        });
+
+        confirmDialog.confirmButton.addEventListener('click', async () => {
+            confirmDialog.confirmButton.disabled = true;
+            confirmDialog.confirmButton.textContent = 'Удаление...';
+
+            await service.deleteCourierCascade(selectedCourier);
+            deleteCandidateCourier = '';
+            trackEvent('courier_deleted', {
+                scope: 'single',
+            }, 'warning');
+            await refreshCourierList();
+
+            confirmDialog.confirmButton.textContent = 'Готово!';
+            window.setTimeout(() => {
+                confirmDialog.close();
+            }, 1200);
+        });
+    });
+
+    deleteCourierDeliveriesButton.addEventListener('click', async () => {
+        if (!deleteCandidateCourier) {
+            ui.showScanResult('error', 'Выберите курьера для удаления передач');
+            return;
+        }
+
+        const selectedCourier = deleteCandidateCourier;
+        const confirmDialog = ui.createConfirmDialog({
+            html: `Вы действительно хотите удалить все передачи у <b style="font-size:16px;">${selectedCourier}</b>?`,
+            confirmText: 'Удалить передачи',
+        });
+
+        confirmDialog.confirmButton.addEventListener('click', async () => {
+            confirmDialog.confirmButton.disabled = true;
+            confirmDialog.confirmButton.textContent = 'Удаление...';
+
+            await service.deleteDeliveriesAndRelatedScansByCourier(selectedCourier);
+            trackEvent('deliveries_deleted', {
+                scope: 'courier',
+            }, 'warning');
+            await refreshCourierList();
+
+            confirmDialog.confirmButton.textContent = 'Готово!';
+            window.setTimeout(() => {
+                confirmDialog.close();
+            }, 1200);
+        });
+    });
+
+    deleteAllCouriersButton.addEventListener('click', async () => {
+        const confirmDialog = ui.createConfirmDialog({
+            html: 'Вы действительно хотите удалить <b style="font-size:16px;">всех курьеров</b>?',
+            confirmText: 'Удалить всех курьеров',
+        });
+
+        confirmDialog.confirmButton.addEventListener('click', async () => {
+            confirmDialog.confirmButton.disabled = true;
+            confirmDialog.confirmButton.textContent = 'Удаление...';
+
+            await service.deleteAllDailyData();
+            deleteCandidateCourier = '';
+            trackEvent('all_data_deleted', {
+                scope: 'all',
+            }, 'warning');
+            await refreshCourierList();
+
+            confirmDialog.confirmButton.textContent = 'Готово!';
+            window.setTimeout(() => {
+                confirmDialog.close();
+            }, 1200);
+        });
+    });
 
     if (typeof service.subscribeCouriers === 'function') {
         unsubscribeCouriers = service.subscribeCouriers(
@@ -437,8 +642,8 @@ export async function openCourierPage({ service, ui, direction }) {
                     return;
                 }
 
-                page.body.innerHTML = '';
-                appendEmptyState(page.body, 'Не удалось загрузить курьеров');
+                listWrap.innerHTML = '';
+                appendEmptyState(listWrap, 'Не удалось загрузить курьеров');
             },
         );
         return;
@@ -459,284 +664,212 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
-        page.body.innerHTML = '';
-        appendEmptyState(page.body, 'Не удалось загрузить курьеров');
+        listWrap.innerHTML = '';
+        appendEmptyState(listWrap, 'Не удалось загрузить курьеров');
     }
 }
 
-function createArchiveCourierPicker() {
-    const root = document.createElement('div');
-    root.className = 'archive-courier-picker';
+import {
+    getBufferShkCodeEntry,
+    getCourierShippingShkCodeEntry,
+    getCrossdockShkCodeEntry,
+    getGateShkCodeEntry,
+} from './shk-svg-data.js';
 
-    const list = document.createElement('div');
-    list.className = 'archive-courier-list';
-    root.appendChild(list);
-
-    let selectedCourier = '';
-
-    function updateSelectionStyles() {
-        list.querySelectorAll('.archive-courier-option').forEach((button) => {
-            const isSelected = button.dataset.courierValue === selectedCourier;
-            button.classList.toggle('is-selected', isSelected);
-            button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-        });
+function getShkSectionIconMarkup(sectionId) {
+    if (sectionId === 'gates') {
+        return `
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 16.5V5.5C3 4.39543 3.89543 3.5 5 3.5H7V16.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M17 16.5V5.5C17 4.39543 16.1046 3.5 15 3.5H13V16.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M7 3.5H13V16.5H7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M10 8.25V11.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+        `;
     }
 
-    function setItems(items, emptyText = 'Курьеры не найдены') {
-        list.innerHTML = '';
-
-        if (items.length === 0) {
-            selectedCourier = '';
-            appendEmptyState(list, emptyText);
-            return;
-        }
-
-        const availableValues = new Set(items.map((item) => item.value));
-        if (!availableValues.has(selectedCourier)) {
-            selectedCourier = '';
-        }
-
-        items.forEach(({ label, value }) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'archive-courier-option';
-            button.dataset.courierValue = value;
-            button.textContent = label;
-            button.setAttribute('aria-pressed', 'false');
-            button.addEventListener('click', () => {
-                selectedCourier = value;
-                updateSelectionStyles();
-            });
-            list.appendChild(button);
-        });
-
-        updateSelectionStyles();
+    if (sectionId === 'buffer') {
+        return `
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="3" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
+                <rect x="12" y="3" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
+                <rect x="3" y="12" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
+                <rect x="12" y="12" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M8 5.5H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M10 8V12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+        `;
     }
 
-    function clearSelection() {
-        selectedCourier = '';
-        updateSelectionStyles();
+    if (sectionId === 'crossdock') {
+        return `
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6.5L8 4V16L4 13.5V6.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M12 4L16 6.5V13.5L12 16V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M8.75 7.25H11.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M10.25 5.75L11.75 7.25L10.25 8.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M11.25 12.75H8.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M9.75 11.25L8.25 12.75L9.75 14.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        `;
     }
 
-    return {
-        root,
-        getValue: () => selectedCourier,
-        clearSelection,
-        setItems,
-    };
+    if (sectionId === 'courier-shipping') {
+        return `
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6.25L10 3L16 6.25V13.75L10 17L4 13.75V6.25Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M10 3V17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M4 6.25L10 9.5L16 6.25" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M6 15.5H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.75"/>
+            </svg>
+        `;
+    }
+
+    return '';
 }
 
-async function appendArchiveControls({ container, service, ui }) {
-    void service.warmAdminData?.();
-
-    const courierPicker = createArchiveCourierPicker();
-    const actions = document.createElement('div');
-    actions.className = 'archive-action-group';
-    const deleteCourierButton = ui.createPrimaryButton('Удалить курьера', {
-        className: 'archive-delete-courier-btn',
-    });
-    const deleteCourierDeliveriesButton = ui.createPrimaryButton(
-        'Удалить передачи',
-        {
-            className: 'archive-delete-btn',
-        },
-    );
-    const deleteAllDeliveriesButton = ui.createPrimaryButton(
-        'Удалить все',
-        {
-            className: 'archive-delete-all-btn',
-        },
-    );
-
-    courierPicker.setItems([], 'Загрузка...');
-    actions.appendChild(deleteCourierButton);
-    actions.appendChild(deleteCourierDeliveriesButton);
-    actions.appendChild(deleteAllDeliveriesButton);
-    container.appendChild(courierPicker.root);
-    container.appendChild(actions);
-
-    function renderCourierOptions(courierNames) {
-        courierPicker.setItems([
-            ...courierNames.map((courierName) => ({
-                label: courierName,
-                value: courierName,
-            })),
-            {
-                label: 'Все курьеры',
-                value: '__all__',
-            },
-        ]);
-    }
-
-    let unsubscribeCouriers = null;
-
-    if (typeof service.subscribeCouriers === 'function') {
-        unsubscribeCouriers = service.subscribeCouriers(
-            (couriers) => {
-                if (!container.isConnected) {
-                    return;
-                }
-
-                renderCourierOptions(uniqueSortedCourierNames(couriers));
-            },
-            (error) => {
-                console.error('Ошибка загрузки курьеров:', error);
-                captureException(error, {
-                    operation: 'subscribe_archive_couriers',
-                    tags: {
-                        scope: 'couriers',
-                    },
-                });
-                ui.showScanResult('error', 'Не удалось загрузить курьеров');
-                courierPicker.setItems([]);
-            },
-        );
-    } else {
-        try {
-            renderCourierOptions(await getCourierNames(service));
-        } catch (error) {
-            console.error('Ошибка загрузки курьеров:', error);
-            captureException(error, {
-                operation: 'load_archive_couriers',
-                tags: {
-                    scope: 'couriers',
-                },
-            });
-            ui.showScanResult('error', 'Не удалось загрузить курьеров');
-            courierPicker.setItems([]);
-        }
-    }
-
-    deleteCourierButton.addEventListener('click', async () => {
-        const selectedCourier = courierPicker.getValue();
-
-        if (!selectedCourier) {
-            ui.showScanResult('error', 'Выберите курьера для удаления');
-            return;
-        }
-
-        if (selectedCourier === '__all__') {
-            const confirmDialog = ui.createConfirmDialog({
-                html: 'Вы действительно хотите удалить <b style="font-size:16px;">всех курьеров</b>?',
-                confirmText: 'Удалить всех курьеров',
-            });
-
-            confirmDialog.confirmButton.addEventListener('click', async () => {
-                confirmDialog.confirmButton.disabled = true;
-                confirmDialog.confirmButton.textContent = 'Удаление...';
-
-                await service.deleteAllDailyData();
-                trackEvent('all_data_deleted', {
-                    scope: 'all',
-                }, 'warning');
-
-                confirmDialog.confirmButton.textContent = 'Готово!';
-                window.setTimeout(() => {
-                    confirmDialog.close();
-                }, 1200);
-            });
-
-            return;
-        }
-
-        const confirmDialog = ui.createConfirmDialog({
-            html: `Вы действительно хотите удалить курьера <b style="font-size:16px;">${selectedCourier}</b>?`,
-            confirmText: 'Удалить курьера',
-        });
-
-        confirmDialog.confirmButton.addEventListener('click', async () => {
-            confirmDialog.confirmButton.disabled = true;
-            confirmDialog.confirmButton.textContent = 'Удаление...';
-
-            await service.deleteCourierCascade(selectedCourier);
-            trackEvent('courier_deleted', {
-                scope: 'single',
-            }, 'warning');
-
-            confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(() => {
-                confirmDialog.close();
-            }, 1200);
-        });
-    });
-
-    deleteCourierDeliveriesButton.addEventListener('click', async () => {
-        const selectedCourier = courierPicker.getValue();
-
-        if (!selectedCourier || selectedCourier === '__all__') {
-            ui.showScanResult('error', 'Выберите курьера для удаления передач');
-            return;
-        }
-
-        const confirmDialog = ui.createConfirmDialog({
-            html: `Вы действительно хотите удалить все передачи у <b style="font-size:16px;">${selectedCourier}</b>?`,
-            confirmText: 'Удалить передачи',
-        });
-
-        confirmDialog.confirmButton.addEventListener('click', async () => {
-            confirmDialog.confirmButton.disabled = true;
-            confirmDialog.confirmButton.textContent = 'Удаление...';
-
-            await service.deleteDeliveriesAndRelatedScansByCourier(selectedCourier);
-            trackEvent('deliveries_deleted', {
-                scope: 'courier',
-            }, 'warning');
-
-            confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(() => {
-                confirmDialog.close();
-            }, 1200);
-        });
-    });
-
-    deleteAllDeliveriesButton.addEventListener('click', async () => {
-        const confirmed = window.confirm(
-            'Удалить все передачи и сканы для всех курьеров?',
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        await service.deleteAllDeliveriesAndScans();
-        trackEvent('deliveries_deleted', {
-            scope: 'all',
-        }, 'warning');
-    });
-    
-    return () => {
-        unsubscribeCouriers?.();
-    };
-}
-
-export async function openArchivePage({ service, ui, direction }) {
+export async function openArchivePage({ ui, direction }) {
     const page = ui.showAppPage({
-        bodyClassName: 'archive-screen',
+        bodyClassName: 'shk-screen',
         direction,
-        onClose: () => {
-            cleanup?.();
-        },
         pageId: 'archivePage',
-        title: 'Удаление данных',
+        title: 'ШК',
     });
-    let cleanup = null;
+
+    const sections = [
+        {
+            id: 'gates',
+            title: 'ВОРОТА',
+            gridClassName: 'is-dual',
+            codes: [
+                getGateShkCodeEntry('left'),
+                getGateShkCodeEntry('right'),
+            ],
+        },
+        {
+            id: 'buffer',
+            title: 'БУФЕР',
+            gridClassName: 'is-triple',
+            codes: ['70', '71', '72', '73', '74', '75', '76', '77', '78'].map(getBufferShkCodeEntry),
+        },
+        {
+            id: 'crossdock',
+            title: 'МЕЖСКЛАД',
+            gridClassName: 'is-quad',
+            codes: [
+                getCrossdockShkCodeEntry('mp'),
+                getCrossdockShkCodeEntry('handoff'),
+                getCrossdockShkCodeEntry('dock452'),
+                getCrossdockShkCodeEntry('dock212'),
+            ],
+        },
+        {
+            id: 'courier-shipping',
+            title: 'ОТГРУЗКА КУРЬЕРОВ',
+            gridClassName: 'is-triple',
+            codes: ['vk2', 'vk3', 'vk4', 'vk5', 'vk6'].map(getCourierShippingShkCodeEntry),
+        },
+    ];
 
     const layout = document.createElement('div');
-    layout.className = 'archive-page-layout';
-    page.body.appendChild(layout);
+    layout.className = 'shk-page-layout';
 
-    cleanup = await appendArchiveControls({
-        container: layout,
-        service,
-        ui,
+    const list = document.createElement('div');
+    list.className = 'app-page-list shk-accordion-list';
+
+    sections.forEach((section) => {
+        const item = document.createElement('div');
+        item.className = 'shk-accordion';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'app-page-list-button shk-accordion-button';
+        button.setAttribute('aria-expanded', 'false');
+
+        const label = document.createElement('span');
+        label.className = 'shk-accordion-label';
+
+        const icon = document.createElement('span');
+        icon.className = 'shk-accordion-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = getShkSectionIconMarkup(section.id);
+
+        const labelText = document.createElement('span');
+        labelText.className = 'shk-accordion-label-text';
+        labelText.textContent = section.title;
+
+        label.appendChild(icon);
+        label.appendChild(labelText);
+
+        const chevron = document.createElement('span');
+        chevron.className = 'shk-accordion-chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.innerHTML = '<svg width="14" height="9" viewBox="0 0 14 9" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1.5L7 7.5L13 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        const panel = document.createElement('div');
+        panel.className = 'shk-accordion-panel';
+        panel.setAttribute('aria-hidden', 'true');
+
+        const panelInner = document.createElement('div');
+        panelInner.className = 'shk-accordion-panel-inner';
+
+        const panelBody = document.createElement('div');
+        panelBody.className = 'shk-accordion-panel-body';
+
+        const codesGrid = document.createElement('div');
+        codesGrid.className = `shk-code-grid${section.gridClassName ? ` ${section.gridClassName}` : ''}`;
+
+        section.codes.forEach((code) => {
+            const card = document.createElement('div');
+            card.className = 'shk-code-card';
+            if (code.isRealQr) {
+                card.classList.add('is-real-qr');
+            }
+
+            if (code.label && !code.isRealQr) {
+                const badge = document.createElement('div');
+                badge.className = 'shk-code-badge';
+                badge.textContent = code.label;
+                card.appendChild(badge);
+            }
+
+            const svgShell = document.createElement('div');
+            svgShell.className = 'shk-code-shell';
+            if (code.isRealQr) {
+                svgShell.classList.add('is-real-qr');
+            }
+            svgShell.innerHTML = code.svgMarkup;
+
+            card.appendChild(svgShell);
+            codesGrid.appendChild(card);
+        });
+
+        panelBody.appendChild(codesGrid);
+        panelInner.appendChild(panelBody);
+        panel.appendChild(panelInner);
+        button.appendChild(label);
+        button.appendChild(chevron);
+        item.appendChild(button);
+        item.appendChild(panel);
+        list.appendChild(item);
+
+        button.addEventListener('click', () => {
+            const isOpen = item.classList.contains('is-open');
+            item.classList.toggle('is-open', !isOpen);
+            button.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+            panel.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
+        });
     });
+
+    layout.appendChild(list);
+    page.body.appendChild(layout);
 }
 
 export function initializeSidebarAdmin({ dom, service, ui }) {
     if (!dom.sidebarMenuNav) {
         return {
-            processButton: null,
             archiveButton: null,
+            processButton: null,
         };
     }
 
@@ -746,53 +879,14 @@ export function initializeSidebarAdmin({ dom, service, ui }) {
         fontSize: '13px',
         marginTop: '1px',
     });
-    const archiveButton = ui.createSidebarButton({
-        id: 'archiveButton',
-        fontSize: '15px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 'auto',
-        marginBottom: '8px',
-        html: '<span style="display:flex;align-items:center;width:20px;justify-content:flex-start;"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="#fff" stroke-width="1.5"/><path d="M3 7h14" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="#fff" stroke-width="1.5"/><path d="M7 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="#fff" stroke-width="1.5"/></svg></span><span style="flex:1;text-align:left;padding-left:12px;">Удаление данных</span>',
-    });
-
     dom.sidebarMenuNav.appendChild(processButton);
-    dom.sidebarMenuNav.appendChild(archiveButton);
 
     processButton.addEventListener('click', async () => {
         await openCourierSelector({ service, ui });
     });
 
-    archiveButton.addEventListener('click', async () => {
-        let cleanup = null;
-        const archiveModal = ui.createModal({
-            className: 'archive-modal-content',
-            maxButtonWidth: 420,
-            onClose: () => {
-                cleanup?.();
-            },
-        });
-
-        const title = document.createElement('div');
-        title.textContent = 'Удаление данных';
-        Object.assign(title.style, {
-            fontSize: '13px',
-            fontWeight: '500',
-            marginBottom: '18px',
-            fontFamily: 'Inter, sans-serif',
-        });
-        archiveModal.content.appendChild(title);
-
-        cleanup = await appendArchiveControls({
-            container: archiveModal.content,
-            service,
-            ui,
-        });
-    });
-
     return {
-        archiveButton,
+        archiveButton: null,
         processButton,
     };
 }

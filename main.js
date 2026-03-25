@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.8.2.6';
+    const APP_VERSION = 'v1.9.2.4';
     const LOGS_PAGE_PASSWORD_HASH =
         '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
     const LOGS_ACCESS_STORAGE_KEY = 'logsPageAccessGranted';
@@ -1674,6 +1674,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `,
             'Тема приложения'
         );
+        themeButton.setAttribute('aria-expanded', 'false');
 
         const themeSelector = document.createElement('div');
         themeSelector.className = 'theme-selector';
@@ -1814,6 +1815,12 @@ document.addEventListener('DOMContentLoaded', () => {
         themeSelector.appendChild(themeRadioGroup);
         paletteSelector.appendChild(buttonPaletteGrid);
 
+        function setThemeSelectorOpen(isOpen) {
+            themeSelector.classList.toggle('is-open', isOpen);
+            themeButton.classList.toggle('is-open', isOpen);
+            themeButton.setAttribute('aria-expanded', String(isOpen));
+        }
+
         function setPaletteSelectorOpen(isOpen) {
             paletteSelector.classList.toggle('is-open', isOpen);
             paletteButton.classList.toggle('is-open', isOpen);
@@ -1823,12 +1830,12 @@ document.addEventListener('DOMContentLoaded', () => {
         themeButton.addEventListener('click', () => {
             setCameraSelectorOpen(false);
             setPaletteSelectorOpen(false);
-            themeSelector.classList.toggle('is-open');
+            setThemeSelectorOpen(!themeSelector.classList.contains('is-open'));
         });
 
         paletteButton.addEventListener('click', () => {
             setCameraSelectorOpen(false);
-            themeSelector.classList.remove('is-open');
+            setThemeSelectorOpen(false);
             setPaletteSelectorOpen(!paletteSelector.classList.contains('is-open'));
         });
 
@@ -1940,7 +1947,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cameraButton.addEventListener('click', async () => {
             const willOpen = !cameraSelector.classList.contains('is-open');
 
-            themeSelector.classList.remove('is-open');
+            setThemeSelectorOpen(false);
             setPaletteSelectorOpen(false);
 
             if (!willOpen) {
@@ -1969,7 +1976,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
 
         logsButton.addEventListener('click', () => {
-            themeSelector.classList.remove('is-open');
+            setThemeSelectorOpen(false);
             setPaletteSelectorOpen(false);
             setCameraSelectorOpen(false);
 

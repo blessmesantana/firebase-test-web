@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QR Generator</title>
+  <style>
+    :root {
+      --bg: #f4f4f1;
+      --card: #ffffff;
+      --line: #dbdbd5;
+      --text: #121212;
+      --muted: #656565;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.08);
+      --radius: 28px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top left, rgba(0, 0, 0, 0.035), transparent 28%),
+        linear-gradient(180deg, #f7f7f4 0%, #ededE8 100%);
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+    }
+
+    .panel {
+      width: min(100%, 460px);
+      padding: 28px;
+      border: 1px solid rgba(18, 18, 18, 0.08);
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .field input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .field input:focus {
+      border-color: #111;
+      box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.06);
+    }
+
+    .preview {
+      margin: 24px 0 20px;
+      padding: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(0, 0, 0, 0.04), transparent 48%),
+        #fbfbf8;
+      border: 1px solid rgba(18, 18, 18, 0.06);
+    }
+
+    #qrCode {
+      width: 300px;
+      height: 300px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 32px;
+      background: #fff;
+    }
+
+    #qrCode canvas,
+    #qrCode svg {
+      display: block;
+    }
+
+    .meta {
+      margin: 14px 0 20px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 18px;
+      padding: 14px 18px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    #downloadBtn {
+      flex: 1;
+      color: #fff;
+      background: #101010;
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+    }
+
+    #resetBtn {
+      color: #101010;
+      background: #efefea;
+    }
+
+    @media (max-width: 520px) {
+      body {
+        padding: 14px;
+      }
+
+      .panel {
+        padding: 20px;
+        border-radius: 24px;
+      }
+
+      #qrCode {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+      }
+
+      .actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>QR Generator</h1>
+    <p class="subtitle">
+      QR обновляется при вводе. Центральный круг формируется как встроенный островок,
+      под которым точки QR скрываются через возможности <code>qr-code-styling</code>.
+    </p>
+
+    <div class="field">
+      <label for="qrInput">Текст или ссылка для QR</label>
+      <input
+        id="qrInput"
+        type="text"
+        placeholder="Например: https://example.com/order/4821"
+        value="https://example.com/order/4821"
+      />
+    </div>
+
+    <div class="field">
+      <label for="centerInput">Текст в центре</label>
+      <input
+        id="centerInput"
+        type="text"
+        maxlength="16"
+        placeholder="Например: ID4821"
+        value="ID4821"
+      />
+    </div>
+
+    <div class="preview">
+      <div id="qrCode" aria-label="Предпросмотр QR-кода"></div>
+    </div>
+
+    <p class="meta">
+      Размер QR: 300x300, коррекция ошибок: H, скругленные точки и стилизованные углы,
+      центральный круг сделан без ручной работы с canvas.
+    </p>
+
+    <div class="actions">
+      <button id="downloadBtn" type="button">Скачать PNG</button>
+      <button id="resetBtn" type="button">Сбросить</button>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.9.2/lib/qr-code-styling.js"></script>
+  <script>
+    const qrInput = document.getElementById("qrInput");
+    const centerInput = document.getElementById("centerInput");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const qrCodeElement = document.getElementById("qrCode");
+
+    const DEFAULT_QR_TEXT = "https://example.com/order/4821";
+    const DEFAULT_CENTER_TEXT = "ID4821";
+    const QR_SIZE = 300;
+
+    const escapeXml = (value) =>
+      value.replace(/[<>&'"]/g, (char) => ({
+        "<": "&lt;",
+        ">": "&gt;",
+        "&": "&amp;",
+        "'": "&apos;",
+        "\"": "&quot;",
+      })[char]);
+
+    function buildCenterIsland(text) {
+      const safeText = escapeXml((text || DEFAULT_CENTER_TEXT).trim().slice(0, 16));
+      const length = safeText.length || DEFAULT_CENTER_TEXT.length;
+      const fontSize = length <= 4 ? 30 : length <= 8 ? 24 : length <= 12 ? 18 : 15;
+      const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="47" fill="white"/>
+          <circle cx="50" cy="50" r="46" fill="none" stroke="#111111" stroke-opacity="0.08" stroke-width="1.5"/>
+          <text
+            x="50"
+            y="50"
+            text-anchor="middle"
+            dominant-baseline="middle"
+            font-family="Segoe UI, Arial, sans-serif"
+            font-size="${fontSize}"
+            font-weight="700"
+            fill="#111111"
+            letter-spacing="-0.02em"
+          >${safeText}</text>
+        </svg>
+      `;
+
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    }
+
+    const qrCode = new QRCodeStyling({
+      width: QR_SIZE,
+      height: QR_SIZE,
+      type: "canvas",
+      data: DEFAULT_QR_TEXT,
+      image: buildCenterIsland(DEFAULT_CENTER_TEXT),
+      margin: 12,
+      qrOptions: {
+        errorCorrectionLevel: "H",
+      },
+      imageOptions: {
+        hideBackgroundDots: true,
+        imageSize: 0.28,
+        margin: 0,
+        crossOrigin: "anonymous",
+      },
+      dotsOptions: {
+        color: "#000000",
+        type: "rounded",
+      },
+      backgroundOptions: {
+        color: "#ffffff",
+      },
+      cornersSquareOptions: {
+        color: "#000000",
+        type: "extra-rounded",
+      },
+      cornersDotOptions: {
+        color: "#000000",
+        type: "dot",
+      },
+    });
+
+    qrCode.append(qrCodeElement);
+
+    function updateQr() {
+      const qrValue = qrInput.value.trim() || DEFAULT_QR_TEXT;
+      const centerValue = centerInput.value.trim() || DEFAULT_CENTER_TEXT;
+
+      qrCode.update({
+        data: qrValue,
+        image: buildCenterIsland(centerValue),
+      });
+    }
+
+    qrInput.addEventListener("input", updateQr);
+    centerInput.addEventListener("input", updateQr);
+
+    downloadBtn.addEventListener("click", () => {
+      const fileBaseName = (centerInput.value.trim() || "qr-code")
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/gi, "-")
+        .replace(/^-+|-+$/g, "") || "qr-code";
+
+      qrCode.download({
+        name: fileBaseName,
+        extension: "png",
+      });
+    });
+
+    resetBtn.addEventListener("click", () => {
+      qrInput.value = DEFAULT_QR_TEXT;
+      centerInput.value = DEFAULT_CENTER_TEXT;
+      updateQr();
+    });
+
+    updateQr();
+  </script>
+</body>
+</html>
