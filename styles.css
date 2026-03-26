@@ -686,13 +686,13 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     text-align: left;
 }
 
-.courier-accordion-status {
+.courier-accordion-complete {
     flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
     color: #4caf50;
     opacity: 0;
     transform: scale(0.85);
@@ -701,21 +701,21 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
         transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
-.courier-accordion-status.is-complete {
+.courier-accordion-complete.is-complete {
     opacity: 1;
     transform: scale(1);
 }
 
-.courier-accordion-chevron {
+.courier-accordion-status {
     flex: 0 0 auto;
-    margin-left: auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    margin-left: auto;
+    min-width: 18px;
     color: var(--color-text-secondary);
-    transition:
-        transform var(--ui-duration-base) var(--ui-ease-standard),
-        color var(--ui-duration-fast) var(--ui-ease-soft);
+    font: 600 12px 'Inter', sans-serif;
+    line-height: 1;
 }
 
 .courier-accordion-select-button {
@@ -777,11 +777,6 @@ body[data-theme='dark'] .settings-screen .data-entry-submit-button:hover {
     flex-direction: column;
     gap: 8px;
     padding: 0 56px 2px 0;
-}
-
-.courier-accordion.is-open .courier-accordion-chevron {
-    transform: rotate(180deg);
-    color: var(--color-primary-text);
 }
 
 .courier-accordion.is-open .courier-accordion-panel {
