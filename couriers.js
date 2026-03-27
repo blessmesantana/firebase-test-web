@@ -8,6 +8,7 @@ import {
     captureException,
     trackEvent,
 } from './logger.js';
+import { normalizeDeliveryId } from './deliveries.js';
 
 function appendEmptyState(target, text) {
     const empty = document.createElement('div');
@@ -35,11 +36,15 @@ async function loadCourierTransfers({ courierName, service }) {
 
     const allDeliveries = deliveries
         .filter((delivery) => delivery.courier_name === courierName)
-        .map((delivery) => delivery.id);
-    const scannedDeliveries = new Set(
+        .map((delivery) => String(delivery.id || ''))
+        .filter(Boolean);
+    const scannedIds = new Set(
         scans
-            .filter((scan) => scan.courier_name === courierName)
-            .map((scan) => scan.delivery_id),
+            .map((scan) => normalizeDeliveryId(scan.delivery_id))
+            .filter(Boolean),
+    );
+    const scannedDeliveries = new Set(
+        allDeliveries.filter((deliveryId) => scannedIds.has(normalizeDeliveryId(deliveryId))),
     );
 
     return {
@@ -75,10 +80,12 @@ async function loadCourierSummaries({ courierNames, service }) {
 
         const scannedIds = new Set(
             scans
-                .filter((scan) => scan.courier_name === courierName)
-                .map((scan) => scan.delivery_id),
+                .map((scan) => normalizeDeliveryId(scan.delivery_id))
+                .filter(Boolean),
         );
-        const allScanned = courierDeliveries.every((delivery) => scannedIds.has(delivery.id));
+        const allScanned = courierDeliveries.every((delivery) => {
+            return scannedIds.has(normalizeDeliveryId(delivery.id));
+        });
 
         if (allScanned) {
             completedCourierNames.add(courierName);
@@ -223,20 +230,41 @@ async function toggleCourierAccordionItem({
     page,
     service,
 }) {
-    const isOpen = item.classList.contains('is-open');
-
-    if (isOpen) {
+    if (item.classList.contains('is-open')) {
         item.classList.remove('is-open');
         item.button.setAttribute('aria-expanded', 'false');
         item.panel.setAttribute('aria-hidden', 'true');
         return;
     }
 
+    await expandCourierAccordionItem({
+        item,
+        courierName,
+        page,
+        service,
+    });
+}
+
+async function expandCourierAccordionItem({
+    item,
+    courierName,
+    page,
+    service,
+    forceReload = false,
+}) {
     item.classList.add('is-open');
     item.button.setAttribute('aria-expanded', 'true');
     item.panel.setAttribute('aria-hidden', 'false');
 
-    if (item.dataset.loaded === 'true' || item.dataset.loading === 'true') {
+    if (item.dataset.loading === 'true') {
+        return;
+    }
+
+    if (forceReload) {
+        delete item.dataset.loaded;
+    }
+
+    if (item.dataset.loaded === 'true') {
         return;
     }
 
@@ -286,6 +314,7 @@ async function toggleCourierAccordionItem({
 
     const notScanned = allDeliveries.filter((id) => !scannedDeliveries.has(id));
     const scanned = allDeliveries.filter((id) => scannedDeliveries.has(id));
+
     const deliveriesList = document.createElement('div');
     deliveriesList.className = 'courier-accordion-deliveries';
 
@@ -303,6 +332,14 @@ async function toggleCourierAccordionItem({
 
     item.panelBody.appendChild(deliveriesList);
     item.dataset.loaded = 'true';
+}
+
+function getOpenCourierNames(listWrap) {
+    return new Set(
+        [...listWrap.querySelectorAll('.courier-accordion.is-open')]
+            .map((item) => item.dataset.courierName)
+            .filter(Boolean),
+    );
 }
 
 function createCourierAccordionItem({
@@ -410,11 +447,15 @@ export async function openCourierPage({ service, ui, direction }) {
         direction,
         onClose: () => {
             unsubscribeCouriers?.();
+            unsubscribeDeliveries?.();
+            unsubscribeScans?.();
         },
         pageId: 'courierPage',
         title: 'Курьеры',
     });
     let unsubscribeCouriers = null;
+    let unsubscribeDeliveries = null;
+    let unsubscribeScans = null;
     let deleteCandidateCourier = '';
 
     const layout = document.createElement('div');
@@ -498,6 +539,7 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
+        const openCourierNames = getOpenCourierNames(listWrap);
         listWrap.innerHTML = '';
 
         if (couriers.length === 0) {
@@ -537,8 +579,10 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
+        const reopenTasks = [];
+
         couriers.forEach((courierName) => {
-            list.appendChild(createCourierAccordionItem({
+            const accordionItem = createCourierAccordionItem({
                 courierName,
                 isComplete: completedCourierNames.has(courierName),
                 isDeleteCandidate: deleteCandidateCourier === courierName,
@@ -546,10 +590,45 @@ export async function openCourierPage({ service, ui, direction }) {
                 onToggleDeleteCandidate: toggleDeleteCandidate,
                 page,
                 service,
-            }));
+            });
+
+            list.appendChild(accordionItem);
+
+            if (openCourierNames.has(courierName)) {
+                reopenTasks.push(
+                    expandCourierAccordionItem({
+                        item: accordionItem,
+                        courierName,
+                        page,
+                        service,
+                        forceReload: true,
+                    }),
+                );
+            }
         });
 
         listWrap.appendChild(list);
+
+        if (reopenTasks.length > 0) {
+            await Promise.allSettled(reopenTasks);
+        }
+    }
+
+    function handleSubscriptionError(operation, error, message) {
+        console.error(message, error);
+        captureException(error, {
+            operation,
+            tags: {
+                scope: 'couriers',
+            },
+        });
+
+        if (!isPageHandleActive(page)) {
+            return;
+        }
+
+        listWrap.innerHTML = '';
+        appendEmptyState(listWrap, message);
     }
 
     deleteCourierButton.addEventListener('click', async () => {
@@ -641,22 +720,44 @@ export async function openCourierPage({ service, ui, direction }) {
                 void renderCourierList(uniqueSortedCourierNames(couriers));
             },
             (error) => {
-                console.error('Ошибка загрузки курьеров:', error);
-                captureException(error, {
-                    operation: 'subscribe_couriers_page',
-                    tags: {
-                        scope: 'couriers',
-                    },
-                });
-
-                if (!isPageHandleActive(page)) {
-                    return;
-                }
-
-                listWrap.innerHTML = '';
-                appendEmptyState(listWrap, 'Не удалось загрузить курьеров');
+                handleSubscriptionError(
+                    'subscribe_couriers_page',
+                    error,
+                    'Не удалось загрузить курьеров',
+                );
             },
         );
+
+        if (typeof service.subscribeDeliveries === 'function') {
+            unsubscribeDeliveries = service.subscribeDeliveries(
+                () => {
+                    void refreshCourierList();
+                },
+                (error) => {
+                    handleSubscriptionError(
+                        'subscribe_deliveries_page',
+                        error,
+                        'Не удалось обновить передачи',
+                    );
+                },
+            );
+        }
+
+        if (typeof service.subscribeScans === 'function') {
+            unsubscribeScans = service.subscribeScans(
+                () => {
+                    void refreshCourierList();
+                },
+                (error) => {
+                    handleSubscriptionError(
+                        'subscribe_scans_page',
+                        error,
+                        'Не удалось обновить сканы',
+                    );
+                },
+            );
+        }
+
         return;
     }
 

@@ -168,6 +168,14 @@ export function subscribeCouriers(onData, onError = null) {
     return subscribeCollection('couriers', onData, onError);
 }
 
+export function subscribeDeliveries(onData, onError = null) {
+    return subscribeCollection('deliveries', onData, onError);
+}
+
+export function subscribeScans(onData, onError = null) {
+    return subscribeCollection('scans', onData, onError);
+}
+
 export function subscribeTelemetryEvents(onData, onError = null) {
     return subscribeCollection(
         'telemetry_events',

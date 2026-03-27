@@ -22,6 +22,10 @@ export function parseRawData(text) {
     return { courierName, deliveryIds };
 }
 
+export function normalizeDeliveryId(rawValue) {
+    return String(rawValue || '').replace(/\D/g, '');
+}
+
 export function findMatchingDeliveries(rawTransferId, deliveries) {
     let cleanedId = '';
     let isShort = false;
@@ -46,15 +50,17 @@ export function findMatchingDeliveries(rawTransferId, deliveries) {
     }
 
     const matches = deliveries.filter((delivery) => {
-        if (!delivery?.id) {
+        const normalizedDeliveryId = normalizeDeliveryId(delivery?.id);
+
+        if (!normalizedDeliveryId) {
             return false;
         }
 
         if (isShort) {
-            return delivery.id.endsWith(cleanedId);
+            return normalizedDeliveryId.endsWith(cleanedId);
         }
 
-        return delivery.id === cleanedId;
+        return normalizedDeliveryId === cleanedId;
     });
 
     return {

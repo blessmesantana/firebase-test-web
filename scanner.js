@@ -1,4 +1,7 @@
-import { findMatchingDeliveries } from './deliveries.js';
+import {
+    findMatchingDeliveries,
+    normalizeDeliveryId,
+} from './deliveries.js';
 import {
     captureException,
     trackEvent,
@@ -13,8 +16,9 @@ export function createScannerController({
 }) {
     async function processDeliveryScan(delivery) {
         const scans = await service.getScans();
+        const normalizedDeliveryId = normalizeDeliveryId(delivery.id);
         const duplicateScan = scans.find(
-            (scan) => scan.delivery_id === delivery.id,
+            (scan) => normalizeDeliveryId(scan.delivery_id) === normalizedDeliveryId,
         );
 
         if (duplicateScan) {
