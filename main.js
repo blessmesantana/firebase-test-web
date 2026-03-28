@@ -154,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.3.3';
+    const APP_VERSION = 'v1.9.3.4';
     const THEMES = ['light', 'blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         light: '#e8e8e8',

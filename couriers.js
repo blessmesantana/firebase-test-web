@@ -457,6 +457,7 @@ export async function openCourierPage({ service, ui, direction }) {
     let unsubscribeDeliveries = null;
     let unsubscribeScans = null;
     let deleteCandidateCourier = '';
+    let renderRequestId = 0;
 
     const layout = document.createElement('div');
     layout.className = 'courier-page-layout';
@@ -539,6 +540,7 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
+        const requestId = ++renderRequestId;
         const openCourierNames = getOpenCourierNames(listWrap);
         listWrap.innerHTML = '';
 
@@ -575,7 +577,7 @@ export async function openCourierPage({ service, ui, direction }) {
             });
         }
 
-        if (!isPageHandleActive(page)) {
+        if (!isPageHandleActive(page) || requestId !== renderRequestId) {
             return;
         }
 
@@ -627,6 +629,7 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
+        renderRequestId += 1;
         listWrap.innerHTML = '';
         appendEmptyState(listWrap, message);
     }
