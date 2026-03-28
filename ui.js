@@ -509,6 +509,27 @@ export function createUiController({ dom }) {
         return homeRootScreen;
     }
 
+    function clearScheduledScreenTransitions(screen) {
+        if (!screen) {
+            return;
+        }
+
+        if (screen._finalizeTimer) {
+            window.clearTimeout(screen._finalizeTimer);
+            screen._finalizeTimer = null;
+        }
+
+        if (screen._showRafPrimary) {
+            window.cancelAnimationFrame(screen._showRafPrimary);
+            screen._showRafPrimary = null;
+        }
+
+        if (screen._showRafSecondary) {
+            window.cancelAnimationFrame(screen._showRafSecondary);
+            screen._showRafSecondary = null;
+        }
+    }
+
     function resetScreenClasses(screen) {
         if (!screen) {
             return;
@@ -534,6 +555,7 @@ export function createUiController({ dom }) {
             return;
         }
 
+        clearScheduledScreenTransitions(screen);
         screen._isClosing = false;
 
         if (screen === homeRootScreen) {
@@ -550,6 +572,7 @@ export function createUiController({ dom }) {
     }
 
     function prepareScreenForEntry(screen, direction) {
+        clearScheduledScreenTransitions(screen);
         resetScreenClasses(screen);
         screen.style.display = '';
 
@@ -598,12 +621,26 @@ export function createUiController({ dom }) {
             return;
         }
 
-        window.setTimeout(() => {
+        clearScheduledScreenTransitions(outgoingScreen);
+        outgoingScreen._finalizeTimer = window.setTimeout(() => {
+            outgoingScreen._finalizeTimer = null;
+
+            if (currentRootScreen !== nextScreen || outgoingScreen === currentRootScreen) {
+                return;
+            }
+
             finalizeOutgoingScreen(outgoingScreen);
         }, APP_PAGE_TRANSITION_MS);
 
-        window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => {
+        nextScreen._showRafPrimary = window.requestAnimationFrame(() => {
+            nextScreen._showRafPrimary = null;
+            nextScreen._showRafSecondary = window.requestAnimationFrame(() => {
+                nextScreen._showRafSecondary = null;
+
+                if (currentRootScreen !== nextScreen) {
+                    return;
+                }
+
                 nextScreen.classList.add('show');
             });
         });

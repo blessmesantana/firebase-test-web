@@ -154,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.3.4';
+    const APP_VERSION = 'v1.9.3.5';
     const THEMES = ['light', 'blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         light: '#e8e8e8',
@@ -164,6 +164,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const BUTTON_PALETTES = ['default', 'pink', 'platinum', 'gold', 'white'];
     let cameraMenuVisible = false;
     let activeCameraPickerModal = null;
+    let cameraMenuRequestId = 0;
+    let cameraPickerRequestId = 0;
+
+    function isPageHandleActive(pageHandle) {
+        return Boolean(pageHandle?.page?.isConnected);
+    }
     let activeBottomNavKey = 'home';
     const bottomNavOrder = ['data', 'couriers', 'home', 'archive', 'settings'];
     const cameraSelectHomeParent = dom.cameraSelect?.parentElement || null;
@@ -878,6 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        cameraMenuRequestId += 1;
         dom.cameraSelect.style.display = 'none';
         dom.cameraSelect.style.position = '';
         dom.cameraSelect.style.left = '';
@@ -920,7 +927,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!cameraMenuVisible) {
+            const requestId = ++cameraMenuRequestId;
             await camera.updateCameraList();
+
+            if (requestId !== cameraMenuRequestId || state.activeRootScreen !== 'home') {
+                return;
+            }
+
             if (anchorElement) {
                 if (dom.cameraSelect.parentElement !== document.body) {
                     document.body.appendChild(dom.cameraSelect);
@@ -938,7 +951,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dom.cameraSelect.style.display = 'inline-block';
             if (typeof dom.cameraSelect.showPicker === 'function') {
                 window.setTimeout(() => {
-                    if (cameraMenuVisible) {
+                    if (cameraMenuVisible && requestId === cameraMenuRequestId) {
                         dom.cameraSelect.showPicker();
                     }
                 }, 0);
@@ -951,6 +964,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function closeCameraPickerModal() {
+        cameraPickerRequestId += 1;
+
         if (!activeCameraPickerModal) {
             return;
         }
@@ -1001,7 +1016,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function openCameraPickerModal() {
+        const requestId = ++cameraPickerRequestId;
         const cameras = await camera.updateCameraList();
+
+        if (requestId !== cameraPickerRequestId) {
+            return;
+        }
 
         if (!Array.isArray(cameras) || cameras.length === 0) {
             ui.showScanResult('error', 'Камеры не найдены', '', '', '');
@@ -1418,11 +1438,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function openLogsPagePanel(options = {}) {
         setActiveBottomNav('settings');
         let unsubscribeTelemetry = null;
+        let logsRenderRequestId = 0;
 
         const page = ui.showAppPage({
             bodyClassName: 'logs-screen',
             direction: options.direction,
             onClose: () => {
+                logsRenderRequestId += 1;
                 unsubscribeTelemetry?.();
             },
             pageId: 'logsPage',
@@ -1448,6 +1470,10 @@ document.addEventListener('DOMContentLoaded', () => {
         list.className = 'logs-list';
 
         const setLogsPlaceholder = (text) => {
+            if (!isPageHandleActive(page)) {
+                return;
+            }
+
             list.innerHTML = '';
             const placeholder = document.createElement('div');
             placeholder.className = 'logs-placeholder';
@@ -1456,6 +1482,10 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const renderLogs = (items) => {
+            if (!isPageHandleActive(page)) {
+                return;
+            }
+
             list.innerHTML = '';
 
             if (!Array.isArray(items) || items.length === 0) {
@@ -1477,6 +1507,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof service.subscribeTelemetryEvents === 'function') {
             unsubscribeTelemetry = service.subscribeTelemetryEvents(
                 (items) => {
+                    if (!isPageHandleActive(page)) {
+                        return;
+                    }
+
                     renderLogs(items);
                 },
                 () => {
@@ -1486,11 +1520,26 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const requestId = ++logsRenderRequestId;
         void service.getTelemetryEvents()
             .then((items) => {
+                if (
+                    requestId !== logsRenderRequestId ||
+                    !isPageHandleActive(page)
+                ) {
+                    return;
+                }
+
                 renderLogs(items);
             })
             .catch(() => {
+                if (
+                    requestId !== logsRenderRequestId ||
+                    !isPageHandleActive(page)
+                ) {
+                    return;
+                }
+
                 setLogsPlaceholder('Нет доступа к telemetry_events');
             });
     }
@@ -1500,9 +1549,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const page = ui.showAppPage({
             bodyClassName: 'settings-screen',
             direction: options.direction,
+            onClose: () => {
+                cameraSelectorRequestId += 1;
+            },
             pageId: 'settingsPage',
             title: 'Настройки',
         });
+        let cameraSelectorRequestId = 0;
 
         const card = document.createElement('div');
         card.className = 'app-page-card';
@@ -1749,13 +1802,25 @@ document.addEventListener('DOMContentLoaded', () => {
         cameraSelector.appendChild(cameraSelectorContent);
 
         function setCameraSelectorOpen(isOpen) {
+            if (!isPageHandleActive(page)) {
+                return;
+            }
+
             cameraSelector.classList.toggle('is-open', isOpen);
             cameraButton.classList.toggle('is-open', isOpen);
             cameraButton.setAttribute('aria-expanded', String(isOpen));
         }
 
         async function renderCameraSelector() {
+            const requestId = ++cameraSelectorRequestId;
             const cameras = await camera.updateCameraList();
+
+            if (
+                requestId !== cameraSelectorRequestId ||
+                !isPageHandleActive(page)
+            ) {
+                return false;
+            }
 
             cameraSelectorList.innerHTML = '';
 
@@ -1831,6 +1896,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const hasCameras = await renderCameraSelector();
+
+            if (!isPageHandleActive(page)) {
+                return;
+            }
+
             setCameraSelectorOpen(hasCameras);
         });
 
