@@ -1,10 +1,28 @@
 import { markNewBadgeSeen, shouldShowNewBadge } from './new-badges.js';
 
 const NEW_BADGE_VERSIONS = new Map([
+    ['v1.9.5.3', 'whats_new_v1.9.5.3'],
     ['v1.9.5.2', 'whats_new_v1.9.5.2'],
 ]);
 
 const WHATS_NEW_SECTIONS = [
+    {
+        version: 'v1.9.5.3',
+        items: [
+            {
+                title: 'Добавлена пользовательская тема',
+                text: 'В настройках темы появился новый пользовательский режим с отдельной настройкой фона и кнопок.',
+            },
+            {
+                title: 'Обновлен выбор цветов',
+                text: 'Для фона и кнопок добавлены отдельные HSB-панели с HEX, предпросмотром и сохранением.',
+            },
+            {
+                title: 'Добавлен ввод HEX',
+                text: 'В пользовательской теме цвет теперь можно вставить вручную в формате HEX.',
+            },
+        ],
+    },
     {
         version: 'v1.9.5.2',
         items: [

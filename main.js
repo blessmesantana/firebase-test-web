@@ -157,10 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.5.2';
+    const CUSTOM_THEME_STORAGE_KEY = 'appCustomTheme';
+    const APP_VERSION = 'v1.9.5.3';
     const ADMIN_PANEL_PASSWORD_HASH =
         '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
-    const THEMES = ['light', 'blue', 'dark'];
+    const THEMES = ['light', 'blue', 'dark', 'custom'];
     const THEME_BROWSER_COLORS = {
         light: '#e8e8e8',
         blue: '#3949AB',
@@ -183,6 +184,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncBrowserThemeColor(themeName) {
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
         if (!themeColorMeta) {
+            return;
+        }
+
+        if (themeName === 'custom') {
+            themeColorMeta.setAttribute(
+                'content',
+                customThemeState?.background?.hex || THEME_BROWSER_COLORS.blue,
+            );
             return;
         }
 
@@ -214,6 +223,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.theme = resolvedTheme;
         document.body.dataset.theme = resolvedTheme;
         localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
+        if (resolvedTheme === 'custom') {
+            applyCustomThemeState(customThemeState);
+        } else {
+            clearCustomThemeState();
+        }
         syncBrowserThemeColor(resolvedTheme);
         setLoggerContext({ theme: resolvedTheme });
         return resolvedTheme;
@@ -235,6 +249,361 @@ document.addEventListener('DOMContentLoaded', () => {
         setLoggerContext({ buttonPalette: resolvedPalette });
         return resolvedPalette;
     }
+
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function normalizeHexColor(value, fallback = '#3949AB') {
+        const normalized = String(value || '').trim();
+        if (/^#[0-9a-f]{6}$/i.test(normalized)) {
+            return normalized.toUpperCase();
+        }
+        return fallback;
+    }
+
+    function parseHexColor(hex) {
+        const normalized = normalizeHexColor(hex);
+        const raw = normalized.slice(1);
+        return {
+            r: Number.parseInt(raw.slice(0, 2), 16),
+            g: Number.parseInt(raw.slice(2, 4), 16),
+            b: Number.parseInt(raw.slice(4, 6), 16),
+        };
+    }
+
+    function rgbToHex(r, g, b) {
+        return `#${[r, g, b]
+            .map((channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, '0'))
+            .join('')}`.toUpperCase();
+    }
+
+    function rgbToHsv(r, g, b) {
+        const normalizedR = r / 255;
+        const normalizedG = g / 255;
+        const normalizedB = b / 255;
+        const max = Math.max(normalizedR, normalizedG, normalizedB);
+        const min = Math.min(normalizedR, normalizedG, normalizedB);
+        const delta = max - min;
+        let hue = 0;
+
+        if (delta !== 0) {
+            if (max === normalizedR) {
+                hue = 60 * (((normalizedG - normalizedB) / delta) % 6);
+            } else if (max === normalizedG) {
+                hue = 60 * (((normalizedB - normalizedR) / delta) + 2);
+            } else {
+                hue = 60 * (((normalizedR - normalizedG) / delta) + 4);
+            }
+        }
+
+        return {
+            h: hue < 0 ? hue + 360 : hue,
+            s: max === 0 ? 0 : delta / max,
+            v: max,
+        };
+    }
+
+    function hsvToRgb(h, s, v) {
+        const hue = ((Number(h) % 360) + 360) % 360;
+        const saturation = clamp(Number(s), 0, 1);
+        const value = clamp(Number(v), 0, 1);
+        const chroma = value * saturation;
+        const x = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+        const match = value - chroma;
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+
+        if (hue < 60) {
+            red = chroma;
+            green = x;
+        } else if (hue < 120) {
+            red = x;
+            green = chroma;
+        } else if (hue < 180) {
+            green = chroma;
+            blue = x;
+        } else if (hue < 240) {
+            green = x;
+            blue = chroma;
+        } else if (hue < 300) {
+            red = x;
+            blue = chroma;
+        } else {
+            red = chroma;
+            blue = x;
+        }
+
+        return {
+            r: Math.round((red + match) * 255),
+            g: Math.round((green + match) * 255),
+            b: Math.round((blue + match) * 255),
+        };
+    }
+
+    function hexToHsv(hex) {
+        const { r, g, b } = parseHexColor(hex);
+        return rgbToHsv(r, g, b);
+    }
+
+    function hsvToHex(h, s, v) {
+        const { r, g, b } = hsvToRgb(h, s, v);
+        return rgbToHex(r, g, b);
+    }
+
+    function rgbaString(hex, alpha) {
+        const { r, g, b } = parseHexColor(hex);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function mixHexColors(baseHex, targetHex, amount) {
+        const base = parseHexColor(baseHex);
+        const target = parseHexColor(targetHex);
+        const ratio = clamp(amount, 0, 1);
+
+        return rgbToHex(
+            base.r + ((target.r - base.r) * ratio),
+            base.g + ((target.g - base.g) * ratio),
+            base.b + ((target.b - base.b) * ratio),
+        );
+    }
+
+    function getRelativeLuminance(hex) {
+        const { r, g, b } = parseHexColor(hex);
+        const channels = [r, g, b].map((channel) => {
+            const normalized = channel / 255;
+            return normalized <= 0.03928
+                ? normalized / 12.92
+                : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+
+        return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+    }
+
+    function parseCssColorToHex(value, fallback) {
+        const normalized = String(value || '').trim();
+        if (!normalized) {
+            return fallback;
+        }
+        if (normalized.startsWith('#')) {
+            return normalizeHexColor(normalized, fallback);
+        }
+        const match = normalized.match(/rgba?\(([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+        if (!match) {
+            return fallback;
+        }
+        return rgbToHex(
+            Number.parseFloat(match[1]),
+            Number.parseFloat(match[2]),
+            Number.parseFloat(match[3]),
+        );
+    }
+
+    function createCustomThemeColorState(hex) {
+        const normalizedHex = normalizeHexColor(hex);
+        const hsv = hexToHsv(normalizedHex);
+        return {
+            hex: normalizedHex,
+            h: hsv.h,
+            s: hsv.s,
+            v: hsv.v,
+        };
+    }
+
+    function getDefaultCustomThemeState() {
+        return {
+            background: createCustomThemeColorState('#3949AB'),
+            buttons: createCustomThemeColorState('#EA1E63'),
+        };
+    }
+
+    function normalizeCustomThemeState(input) {
+        const fallback = getDefaultCustomThemeState();
+        const source = input && typeof input === 'object' ? input : {};
+
+        return {
+            background: createCustomThemeColorState(
+                source.background?.hex || fallback.background.hex,
+            ),
+            buttons: createCustomThemeColorState(
+                source.buttons?.hex || fallback.buttons.hex,
+            ),
+        };
+    }
+
+    function loadCustomThemeState() {
+        try {
+            const raw = localStorage.getItem(CUSTOM_THEME_STORAGE_KEY);
+            if (!raw) {
+                return getDefaultCustomThemeState();
+            }
+            return normalizeCustomThemeState(JSON.parse(raw));
+        } catch (error) {
+            return getDefaultCustomThemeState();
+        }
+    }
+
+    function persistCustomThemeState() {
+        localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify(customThemeState));
+    }
+
+    function seedCustomThemeFromCurrentStyles() {
+        const styles = window.getComputedStyle(document.documentElement);
+        const backgroundHex = parseCssColorToHex(
+            styles.getPropertyValue('--color-app-bg'),
+            '#3949AB',
+        );
+        const buttonHex = parseCssColorToHex(
+            styles.getPropertyValue('--color-frame'),
+            '#EA1E63',
+        );
+
+        customThemeState = normalizeCustomThemeState({
+            background: { hex: backgroundHex },
+            buttons: { hex: buttonHex },
+        });
+        persistCustomThemeState();
+    }
+
+    function setThemeVariables(variableMap) {
+        Object.entries(variableMap).forEach(([name, value]) => {
+            document.documentElement.style.setProperty(name, value);
+            document.body.style.setProperty(name, value);
+        });
+    }
+
+    function clearCustomThemeState() {
+        [
+            '--color-app-bg',
+            '--color-screen-bg',
+            '--color-surface',
+            '--color-surface-strong',
+            '--color-surface-soft',
+            '--color-input-bg',
+            '--color-input-text',
+            '--color-input-muted',
+            '--color-manual-entry-bg',
+            '--color-manual-entry-text',
+            '--color-manual-entry-border',
+            '--color-data-entry-textarea-bg',
+            '--color-data-entry-textarea-text',
+            '--color-button-group-bg',
+            '--color-qr-surface',
+            '--color-modal-surface',
+            '--color-sidebar-surface',
+            '--color-sidebar-hover',
+            '--color-qr-shell-bg',
+            '--shadow-soft',
+            '--shadow-card',
+            '--shadow-nav',
+            '--shadow-button',
+            '--shadow-button-accent',
+            '--shadow-button-accent-hover',
+            '--shadow-qr-container',
+            '--color-frame',
+            '--color-frame-shadow',
+            '--color-primary',
+            '--color-primary-hover',
+            '--color-primary-text',
+            '--color-button-accent-border',
+            '--color-scan-button-bg',
+            '--color-scan-button-hover-bg',
+            '--color-scan-button-text',
+            '--shadow-scan-button',
+            '--nav-bg',
+            '--nav-hover-bg',
+            '--nav-active-bg',
+            '--nav-active-shadow',
+            '--nav-active-content-color',
+            '--nav-glider-opacity',
+            '--nav-glider-bg',
+            '--nav-glider-shadow',
+        ].forEach((name) => {
+            document.documentElement.style.removeProperty(name);
+            document.body.style.removeProperty(name);
+        });
+    }
+
+    function applyCustomThemeState(nextState) {
+        customThemeState = normalizeCustomThemeState(nextState);
+        persistCustomThemeState();
+
+        const backgroundHex = customThemeState.background.hex;
+        const buttonHex = customThemeState.buttons.hex;
+        const buttonHoverHex = mixHexColors(buttonHex, '#000000', 0.16);
+        const buttonTextIsDark = getRelativeLuminance(buttonHex) > 0.58;
+        const isLightBackground = getRelativeLuminance(backgroundHex) > 0.5;
+        const surfaceColor = isLightBackground
+            ? rgbaString('#FFFFFF', 0.58)
+            : rgbaString('#FFFFFF', 0.08);
+        const surfaceSoft = isLightBackground
+            ? rgbaString('#FFFFFF', 0.74)
+            : rgbaString('#FFFFFF', 0.1);
+        const surfaceStrong = isLightBackground
+            ? mixHexColors(backgroundHex, '#FFFFFF', 0.2)
+            : mixHexColors(backgroundHex, '#FFFFFF', 0.07);
+        const inputBg = isLightBackground ? '#FFFFFF' : mixHexColors(backgroundHex, '#000000', 0.22);
+        const inputText = isLightBackground ? '#1F242B' : '#F5F5F5';
+        const inputMuted = isLightBackground ? '#7F8793' : '#B8B8C2';
+        const buttonText = buttonTextIsDark ? '#1F242B' : '#FFFFFF';
+        const navBg = isLightBackground ? rgbaString('#FFFFFF', 0.62) : rgbaString(backgroundHex, 0.78);
+
+        setThemeVariables({
+            '--color-app-bg': backgroundHex,
+            '--color-screen-bg': backgroundHex,
+            '--color-surface': surfaceColor,
+            '--color-surface-strong': surfaceStrong,
+            '--color-surface-soft': surfaceSoft,
+            '--color-input-bg': inputBg,
+            '--color-input-text': inputText,
+            '--color-input-muted': inputMuted,
+            '--color-manual-entry-bg': 'transparent',
+            '--color-manual-entry-text': isLightBackground ? '#1F242B' : '#FFFFFF',
+            '--color-manual-entry-border': rgbaString(buttonHex, 0.42),
+            '--color-data-entry-textarea-bg': isLightBackground ? rgbaString('#FFFFFF', 0.84) : surfaceSoft,
+            '--color-data-entry-textarea-text': inputText,
+            '--color-button-group-bg': isLightBackground ? mixHexColors(backgroundHex, '#FFFFFF', 0.38) : mixHexColors(backgroundHex, '#FFFFFF', 0.24),
+            '--color-qr-surface': isLightBackground ? rgbaString('#FFFFFF', 0.9) : mixHexColors(backgroundHex, '#000000', 0.12),
+            '--color-modal-surface': isLightBackground ? mixHexColors(backgroundHex, '#FFFFFF', 0.18) : mixHexColors(backgroundHex, '#000000', 0.1),
+            '--color-sidebar-surface': isLightBackground ? rgbaString('#FFFFFF', 0.88) : rgbaString(backgroundHex, 0.92),
+            '--color-sidebar-hover': isLightBackground ? rgbaString('#1F242B', 0.06) : rgbaString('#FFFFFF', 0.06),
+            '--color-qr-shell-bg': rgbaString(buttonHex, 0.08),
+            '--shadow-soft': isLightBackground ? '0 10px 28px rgba(31, 36, 43, 0.12)' : '0 4px 24px rgba(0, 0, 0, 0.18)',
+            '--shadow-card': isLightBackground ? '0 14px 30px rgba(31, 36, 43, 0.08)' : `0 12px 28px ${rgbaString(backgroundHex, 0.34)}`,
+            '--shadow-nav': isLightBackground
+                ? 'inset 1px 1px 3px rgba(255, 255, 255, 0.75), inset -1px -1px 4px rgba(138, 145, 157, 0.18), 0 12px 28px rgba(31, 36, 43, 0.12)'
+                : 'inset 1px 1px 4px rgba(255, 255, 255, 0.08), inset -1px -1px 6px rgba(0, 0, 0, 0.22), 0 10px 30px rgba(0, 0, 0, 0.24)',
+            '--shadow-button': isLightBackground ? '0 10px 24px rgba(31, 36, 43, 0.08)' : '0 10px 24px rgba(47, 67, 196, 0.2)',
+            '--shadow-button-accent': `0 0 10px ${rgbaString(buttonHex, 0.28)}, 0 0 24px ${rgbaString(buttonHex, 0.16)}`,
+            '--shadow-button-accent-hover': `0 0 12px ${rgbaString(buttonHex, 0.34)}, 0 0 28px ${rgbaString(buttonHex, 0.18)}`,
+            '--shadow-qr-container': isLightBackground
+                ? '0 20px 34px rgba(31, 36, 43, 0.08)'
+                : `0 18px 34px ${rgbaString(buttonHex, 0.12)}, 0 0 24px ${rgbaString(buttonHex, 0.08)}`,
+            '--color-frame': buttonHex,
+            '--color-frame-shadow': `0 0 16px ${rgbaString(buttonHex, 0.24)}`,
+            '--color-primary': buttonHex,
+            '--color-primary-hover': buttonHoverHex,
+            '--color-primary-text': buttonText,
+            '--color-button-accent-border': rgbaString(buttonHex, 0.42),
+            '--color-scan-button-bg': buttonHex,
+            '--color-scan-button-hover-bg': buttonHoverHex,
+            '--color-scan-button-text': buttonText,
+            '--shadow-scan-button': isLightBackground
+                ? `0 10px 24px ${rgbaString(buttonHex, 0.18)}`
+                : `0 10px 24px ${rgbaString(buttonHex, 0.22)}`,
+            '--nav-bg': navBg,
+            '--nav-hover-bg': isLightBackground ? rgbaString('#1F242B', 0.04) : rgbaString('#FFFFFF', 0.08),
+            '--nav-active-bg': 'transparent',
+            '--nav-active-shadow': 'none',
+            '--nav-active-content-color': buttonText,
+            '--nav-glider-opacity': '1',
+            '--nav-glider-bg': `linear-gradient(135deg, ${mixHexColors(buttonHex, '#FFFFFF', 0.34)}, ${buttonHex})`,
+            '--nav-glider-shadow': `0 0 18px ${rgbaString(buttonHex, 0.36)}, 0 0 10px ${rgbaString(mixHexColors(buttonHex, '#FFFFFF', 0.42), 0.24)} inset`,
+        });
+    }
+
+    let customThemeState = loadCustomThemeState();
 
     function detectRuntimeContext() {
         const ua = navigator.userAgent || '';
@@ -1888,33 +2257,56 @@ document.addEventListener('DOMContentLoaded', () => {
         darkThemeButton.className = 'theme-radio-button';
         darkThemeButton.textContent = 'Темная';
 
+        const customThemeButton = document.createElement('button');
+        customThemeButton.type = 'button';
+        customThemeButton.className = 'theme-radio-button';
+        customThemeButton.textContent = 'Custom';
+
         function syncThemeSelector(themeName) {
             const activeThemeName = THEMES.includes(themeName) ? themeName : 'blue';
             lightThemeButton.classList.toggle('is-active', activeThemeName === 'light');
             blueThemeButton.classList.toggle('is-active', activeThemeName === 'blue');
             darkThemeButton.classList.toggle('is-active', activeThemeName === 'dark');
+            customThemeButton.classList.toggle('is-active', activeThemeName === 'custom');
             themeRadioGroup.style.setProperty(
                 '--theme-active-index',
                 String(Math.max(THEMES.indexOf(activeThemeName), 0)),
             );
             themeRadioGroup.setAttribute('data-theme-preview', activeThemeName);
+            themeRadioGroup.style.setProperty(
+                '--theme-custom-preview',
+                customThemeState.buttons.hex,
+            );
         }
 
         lightThemeButton.addEventListener('click', () => {
             syncThemeSelector(applyTheme('light'));
+            syncButtonPaletteAvailability('light');
         });
 
         blueThemeButton.addEventListener('click', () => {
             syncThemeSelector(applyTheme('blue'));
+            syncButtonPaletteAvailability('blue');
         });
 
         darkThemeButton.addEventListener('click', () => {
             syncThemeSelector(applyTheme('dark'));
+            syncButtonPaletteAvailability('dark');
+        });
+
+        customThemeButton.addEventListener('click', () => {
+            if (!localStorage.getItem(CUSTOM_THEME_STORAGE_KEY)) {
+                seedCustomThemeFromCurrentStyles();
+            }
+            syncThemeSelector(applyTheme('custom'));
+            syncButtonPaletteAvailability('custom');
+            syncCustomThemePreview();
         });
 
         themeRadioGroup.appendChild(lightThemeButton);
         themeRadioGroup.appendChild(blueThemeButton);
         themeRadioGroup.appendChild(darkThemeButton);
+        themeRadioGroup.appendChild(customThemeButton);
         themeSelector.appendChild(themeRadioGroup);
 
         const paletteButton = ui.createPrimaryButton('Цвет кнопок', {
@@ -1996,6 +2388,315 @@ document.addEventListener('DOMContentLoaded', () => {
 
         paletteSelector.appendChild(buttonPaletteGrid);
 
+        const customThemeButtonToggle = ui.createPrimaryButton('Пользовательские цвета', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            customThemeButtonToggle,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13.5 4.5C10.75 7.4 7 11 7 14.25C7 17.0114 9.23858 19.25 12 19.25C14.7614 19.25 17 17.0114 17 14.25C17 11 13.5 7.4 13.5 4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M10.25 14.75C10.25 13.5074 11.2574 12.5 12.5 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+            `,
+            'Пользовательские цвета'
+        );
+        customThemeButtonToggle.setAttribute('aria-expanded', 'false');
+
+        const customThemeSelector = document.createElement('div');
+        customThemeSelector.className = 'theme-selector custom-theme-selector';
+
+        const customThemeNote = document.createElement('div');
+        customThemeNote.className = 'custom-theme-note';
+        customThemeNote.textContent = 'Фон и кнопки можно настраивать вручную через палитру и HEX.';
+
+        const customThemePanels = new Map();
+        const customThemeButtons = new Map();
+        const customThemeList = document.createElement('div');
+        customThemeList.className = 'custom-theme-list';
+        const customThemePanelsHost = document.createElement('div');
+        customThemePanelsHost.className = 'custom-theme-panels-host';
+
+        function syncCustomThemePreview() {
+            themeRadioGroup.style.setProperty('--theme-custom-preview', customThemeState.buttons.hex);
+            customThemeButtons.forEach((button, key) => {
+                button.style.setProperty('--custom-theme-swatch', customThemeState[key].hex);
+            });
+            customThemePanels.forEach((panel) => panel.sync());
+        }
+
+        function syncButtonPaletteAvailability(themeName) {
+            const isCustomTheme = themeName === 'custom';
+            paletteButton.disabled = isCustomTheme;
+            paletteButton.classList.toggle('is-disabled', isCustomTheme);
+            paletteSelector.classList.toggle('is-disabled', isCustomTheme);
+            buttonPaletteGrid.classList.toggle('is-disabled', isCustomTheme);
+            if (isCustomTheme) {
+                setPaletteSelectorOpen(false);
+            }
+        }
+
+        function updateCustomThemeColorState(colorKey, nextHex) {
+            customThemeState = {
+                ...customThemeState,
+                [colorKey]: createCustomThemeColorState(nextHex),
+            };
+
+            const currentThemeName = document.body.dataset.theme || 'blue';
+            if (currentThemeName !== 'custom') {
+                syncThemeSelector(applyTheme('custom'));
+            } else {
+                applyCustomThemeState(customThemeState);
+                syncThemeSelector('custom');
+            }
+
+            syncButtonPaletteAvailability('custom');
+            syncCustomThemePreview();
+        }
+
+        customThemeSelector.appendChild(customThemeNote);
+        customThemeSelector.appendChild(customThemeList);
+        customThemeSelector.appendChild(customThemePanelsHost);
+
+        function setActiveCustomThemePanel(activeKey = null) {
+            customThemeButtons.forEach((button, key) => {
+                button.classList.toggle('is-active', key === activeKey);
+            });
+            customThemePanels.forEach((panel, key) => {
+                panel.root.classList.toggle('is-open', key === activeKey);
+                if (key === activeKey) {
+                    panel.syncDraftFromState();
+                    panel.sync();
+                }
+            });
+        }
+
+        function createSliderRow(labelText, min, max, step) {
+            const row = document.createElement('label');
+            row.className = 'custom-theme-slider-row';
+
+            const label = document.createElement('div');
+            label.className = 'custom-theme-slider-label';
+            label.textContent = labelText;
+
+            const value = document.createElement('div');
+            value.className = 'custom-theme-slider-value';
+
+            const range = document.createElement('input');
+            range.type = 'range';
+            range.min = String(min);
+            range.max = String(max);
+            range.step = String(step);
+            range.className = 'custom-theme-slider-input';
+
+            row.appendChild(label);
+            row.appendChild(value);
+            row.appendChild(range);
+
+            return { row, label, value, range };
+        }
+
+        function createCustomThemePanel(colorKey, label) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'custom-theme-open-button';
+            button.innerHTML = `
+                <span class="custom-theme-open-button-label">${label}</span>
+                <span class="custom-theme-open-button-value">${customThemeState[colorKey].hex}</span>
+                <span class="custom-theme-open-button-swatch" aria-hidden="true"></span>
+            `;
+            customThemeButtons.set(colorKey, button);
+            customThemeList.appendChild(button);
+
+            const panel = document.createElement('div');
+            panel.className = 'custom-theme-panel';
+
+            const panelTop = document.createElement('div');
+            panelTop.className = 'custom-theme-panel-top';
+
+            const modeLabel = document.createElement('div');
+            modeLabel.className = 'custom-theme-panel-mode';
+            modeLabel.innerHTML = 'HSB <span aria-hidden="true">▼</span>';
+
+            const panelHex = document.createElement('input');
+            panelHex.className = 'custom-theme-panel-hex';
+            panelHex.type = 'text';
+            panelHex.inputMode = 'text';
+            panelHex.autocapitalize = 'characters';
+            panelHex.spellcheck = false;
+            panelHex.maxLength = 7;
+
+            const panelSwatch = document.createElement('div');
+            panelSwatch.className = 'custom-theme-panel-swatch';
+
+            panelTop.appendChild(modeLabel);
+            panelTop.appendChild(panelHex);
+            panelTop.appendChild(panelSwatch);
+
+            const hueSlider = createSliderRow('H', 0, 360, 1);
+            hueSlider.row.classList.add('custom-theme-slider-row--hue');
+
+            const saturationSlider = createSliderRow('S', 0, 100, 1);
+            saturationSlider.row.classList.add('custom-theme-slider-row--sat');
+
+            const brightnessSlider = createSliderRow('B', 0, 100, 1);
+            brightnessSlider.row.classList.add('custom-theme-slider-row--bright');
+
+            const actions = document.createElement('div');
+            actions.className = 'custom-theme-panel-actions';
+
+            const cancelButton = ui.createSecondaryButton('Cancel', {
+                className: 'custom-theme-panel-cancel',
+            });
+            const saveButton = ui.createPrimaryButton('Save', {
+                className: 'custom-theme-panel-save',
+            });
+
+            actions.appendChild(cancelButton);
+            actions.appendChild(saveButton);
+
+            panel.appendChild(panelTop);
+            panel.appendChild(hueSlider.row);
+            panel.appendChild(saturationSlider.row);
+            panel.appendChild(brightnessSlider.row);
+            panel.appendChild(actions);
+            customThemePanelsHost.appendChild(panel);
+
+            let draftState = { ...customThemeState[colorKey] };
+
+            function syncDraftFromState() {
+                draftState = { ...customThemeState[colorKey] };
+            }
+
+            function sync() {
+                const hueColor = hsvToHex(draftState.h, 1, 1);
+                const satGradientStart = hsvToHex(draftState.h, 0, draftState.v);
+                const satGradientEnd = hsvToHex(draftState.h, 1, draftState.v);
+                const brightGradientStart = '#000000';
+                const brightGradientEnd = hsvToHex(draftState.h, draftState.s, 1);
+
+                if (document.activeElement !== panelHex) {
+                    panelHex.value = draftState.hex;
+                }
+                panelSwatch.style.background = draftState.hex;
+
+                hueSlider.range.value = String(Math.round(draftState.h));
+                hueSlider.value.textContent = String(Math.round(draftState.h));
+                hueSlider.range.style.background = `
+                    linear-gradient(
+                        90deg,
+                        #ff0000 0%,
+                        #ffff00 17%,
+                        #00ff00 34%,
+                        #00ffff 50%,
+                        #0000ff 67%,
+                        #ff00ff 84%,
+                        #ff0000 100%
+                    )
+                `;
+
+                saturationSlider.range.value = String(Math.round(draftState.s * 100));
+                saturationSlider.value.textContent = String(Math.round(draftState.s * 100));
+                saturationSlider.range.style.background = `linear-gradient(90deg, ${satGradientStart}, ${satGradientEnd})`;
+
+                brightnessSlider.range.value = String(Math.round(draftState.v * 100));
+                brightnessSlider.value.textContent = String(Math.round(draftState.v * 100));
+                brightnessSlider.range.style.background = `linear-gradient(90deg, ${brightGradientStart}, ${brightGradientEnd})`;
+
+                modeLabel.style.color = hueColor;
+                button.querySelector('.custom-theme-open-button-value').textContent = customThemeState[colorKey].hex;
+            }
+
+            function updateDraftFromHsv(nextH, nextS, nextV) {
+                draftState = {
+                    h: clamp(nextH, 0, 360),
+                    s: clamp(nextS, 0, 1),
+                    v: clamp(nextV, 0, 1),
+                    hex: hsvToHex(nextH, nextS, nextV),
+                };
+                panelHex.classList.remove('is-invalid');
+                sync();
+            }
+
+            hueSlider.range.addEventListener('input', () => {
+                updateDraftFromHsv(
+                    Number(hueSlider.range.value),
+                    draftState.s,
+                    draftState.v,
+                );
+            });
+
+            saturationSlider.range.addEventListener('input', () => {
+                updateDraftFromHsv(
+                    draftState.h,
+                    Number(saturationSlider.range.value) / 100,
+                    draftState.v,
+                );
+            });
+
+            brightnessSlider.range.addEventListener('input', () => {
+                updateDraftFromHsv(
+                    draftState.h,
+                    draftState.s,
+                    Number(brightnessSlider.range.value) / 100,
+                );
+            });
+
+            panelHex.addEventListener('input', () => {
+                const normalizedValue = panelHex.value.startsWith('#')
+                    ? panelHex.value
+                    : `#${panelHex.value}`;
+
+                if (!/^#[0-9a-f]{6}$/i.test(normalizedValue)) {
+                    panelHex.classList.add('is-invalid');
+                    return;
+                }
+
+                const hsv = hexToHsv(normalizedValue);
+                draftState = {
+                    hex: normalizeHexColor(normalizedValue),
+                    h: hsv.h,
+                    s: hsv.s,
+                    v: hsv.v,
+                };
+                panelHex.classList.remove('is-invalid');
+                sync();
+            });
+
+            panelHex.addEventListener('blur', () => {
+                panelHex.classList.remove('is-invalid');
+                panelHex.value = draftState.hex;
+            });
+
+            cancelButton.addEventListener('click', () => {
+                syncDraftFromState();
+                sync();
+                setActiveCustomThemePanel(null);
+            });
+
+            saveButton.addEventListener('click', () => {
+                updateCustomThemeColorState(colorKey, draftState.hex);
+                setActiveCustomThemePanel(null);
+            });
+
+            button.addEventListener('click', () => {
+                setActiveCustomThemePanel(
+                    panel.classList.contains('is-open') ? null : colorKey,
+                );
+            });
+
+            const api = {
+                root: panel,
+                syncDraftFromState,
+                sync,
+            };
+            customThemePanels.set(colorKey, api);
+            sync();
+        }
+
+        createCustomThemePanel('background', 'Фон');
+        createCustomThemePanel('buttons', 'Кнопки');
+
         function setThemeSelectorOpen(isOpen) {
             themeSelector.classList.toggle('is-open', isOpen);
             themeButton.classList.toggle('is-open', isOpen);
@@ -2008,22 +2709,50 @@ document.addEventListener('DOMContentLoaded', () => {
             paletteButton.setAttribute('aria-expanded', String(isOpen));
         }
 
+        function setCustomThemeSelectorOpen(isOpen) {
+            customThemeSelector.classList.toggle('is-open', isOpen);
+            customThemeButtonToggle.classList.toggle('is-open', isOpen);
+            customThemeButtonToggle.setAttribute('aria-expanded', String(isOpen));
+        }
+
         themeButton.addEventListener('click', () => {
             setPaletteSelectorOpen(false);
+            setCustomThemeSelectorOpen(false);
             setThemeSelectorOpen(!themeSelector.classList.contains('is-open'));
         });
 
         paletteButton.addEventListener('click', () => {
+            if (paletteButton.disabled) {
+                return;
+            }
             setThemeSelectorOpen(false);
+            setCustomThemeSelectorOpen(false);
             setPaletteSelectorOpen(!paletteSelector.classList.contains('is-open'));
+        });
+
+        customThemeButtonToggle.addEventListener('click', () => {
+            if (!localStorage.getItem(CUSTOM_THEME_STORAGE_KEY)) {
+                seedCustomThemeFromCurrentStyles();
+                syncCustomThemePreview();
+            }
+            setThemeSelectorOpen(false);
+            setPaletteSelectorOpen(false);
+            setCustomThemeSelectorOpen(!customThemeSelector.classList.contains('is-open'));
         });
 
         const resetThemeButton = ui.createPrimaryButton('По умолчанию', {
             className: 'data-entry-submit-button theme-reset-button',
         });
         resetThemeButton.addEventListener('click', () => {
+            customThemeState = getDefaultCustomThemeState();
+            localStorage.removeItem(CUSTOM_THEME_STORAGE_KEY);
+            setCustomThemeSelectorOpen(false);
+            setPaletteSelectorOpen(false);
+            setThemeSelectorOpen(false);
             syncThemeSelector(applyTheme('blue'));
             syncButtonPaletteSelector(applyButtonPalette('default'));
+            syncButtonPaletteAvailability('blue');
+            syncCustomThemePreview();
             ui.showToast('Настройки темы сброшены', {
                 duration: 1800,
             });
@@ -2031,11 +2760,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         syncThemeSelector(document.body.dataset.theme || 'blue');
         syncButtonPaletteSelector(document.body.dataset.buttonPalette || 'default');
+        syncButtonPaletteAvailability(document.body.dataset.theme || 'blue');
+        syncCustomThemePreview();
 
         card.appendChild(themeButton);
         card.appendChild(themeSelector);
         card.appendChild(paletteButton);
         card.appendChild(paletteSelector);
+        card.appendChild(customThemeButtonToggle);
+        card.appendChild(customThemeSelector);
         card.appendChild(resetThemeButton);
         layout.appendChild(card);
         page.body.appendChild(layout);
