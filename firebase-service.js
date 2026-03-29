@@ -13,6 +13,14 @@ import {
 const collectionCache = new Map();
 const collectionVersions = new Map();
 
+function normalizeCourierName(value) {
+    return String(value || '').trim().toLocaleLowerCase('ru-RU');
+}
+
+function normalizeDeliveryId(value) {
+    return String(value || '').trim();
+}
+
 function snapshotToArray(snapshot) {
     const items = [];
 
@@ -277,9 +285,10 @@ export async function deleteAllDeliveriesAndScans() {
 }
 
 export async function deleteCourierByName(courierName) {
+    const normalizedCourierName = normalizeCourierName(courierName);
     const couriers = await getCouriers();
     const keysToDelete = couriers
-        .filter((courier) => courier.name === courierName)
+        .filter((courier) => normalizeCourierName(courier.name) === normalizedCourierName)
         .map((courier) => `couriers/${courier.key}`);
 
     await removePaths(keysToDelete);
@@ -289,9 +298,10 @@ export async function deleteCourierByName(courierName) {
 }
 
 export async function deleteDeliveriesByCourier(courierName) {
+    const normalizedCourierName = normalizeCourierName(courierName);
     const deliveries = await getDeliveries();
     const matchedDeliveries = deliveries.filter(
-        (delivery) => delivery.courier_name === courierName,
+        (delivery) => normalizeCourierName(delivery.courier_name) === normalizedCourierName,
     );
 
     await removePaths(
@@ -303,8 +313,11 @@ export async function deleteDeliveriesByCourier(courierName) {
 }
 
 export async function deleteScansByCourier(courierName) {
+    const normalizedCourierName = normalizeCourierName(courierName);
     const scans = await getScans();
-    const matchedScans = scans.filter((scan) => scan.courier_name === courierName);
+    const matchedScans = scans.filter(
+        (scan) => normalizeCourierName(scan.courier_name) === normalizedCourierName,
+    );
 
     await removePaths(matchedScans.map((scan) => `scans/${scan.key}`));
     invalidateCollections(['scans'], { prefetch: true });
@@ -313,14 +326,48 @@ export async function deleteScansByCourier(courierName) {
 }
 
 export async function deleteScansByDeliveryIds(deliveryIds) {
-    const ids = new Set(deliveryIds.filter(Boolean));
+    const ids = new Set(deliveryIds.map((deliveryId) => normalizeDeliveryId(deliveryId)).filter(Boolean));
 
     if (ids.size === 0) {
         return [];
     }
 
     const scans = await getScans();
-    const matchedScans = scans.filter((scan) => ids.has(scan.delivery_id));
+    const matchedScans = scans.filter((scan) => ids.has(normalizeDeliveryId(scan.delivery_id)));
+
+    await removePaths(matchedScans.map((scan) => `scans/${scan.key}`));
+    invalidateCollections(['scans'], { prefetch: true });
+
+    return matchedScans;
+}
+
+export async function deleteDeliveryByCourierAndId(courierName, deliveryId) {
+    const normalizedCourierName = normalizeCourierName(courierName);
+    const normalizedDeliveryId = normalizeDeliveryId(deliveryId);
+    const deliveries = await getDeliveries();
+    const matchedDeliveries = deliveries.filter(
+        (delivery) =>
+            normalizeCourierName(delivery.courier_name) === normalizedCourierName &&
+            normalizeDeliveryId(delivery.id) === normalizedDeliveryId,
+    );
+
+    await removePaths(
+        matchedDeliveries.map((delivery) => `deliveries/${delivery.key}`),
+    );
+    invalidateCollections(['deliveries'], { prefetch: true });
+
+    return matchedDeliveries;
+}
+
+export async function deleteScansByCourierAndDeliveryId(courierName, deliveryId) {
+    const normalizedCourierName = normalizeCourierName(courierName);
+    const normalizedDeliveryId = normalizeDeliveryId(deliveryId);
+    const scans = await getScans();
+    const matchedScans = scans.filter(
+        (scan) =>
+            normalizeCourierName(scan.courier_name) === normalizedCourierName &&
+            normalizeDeliveryId(scan.delivery_id) === normalizedDeliveryId,
+    );
 
     await removePaths(matchedScans.map((scan) => `scans/${scan.key}`));
     invalidateCollections(['scans'], { prefetch: true });
@@ -351,5 +398,15 @@ export async function deleteDeliveriesAndRelatedScansByCourier(courierName) {
 
     return {
         deletedDeliveryIds,
+    };
+}
+
+export async function deleteDeliveryAndRelatedScansByCourier(courierName, deliveryId) {
+    const deletedDeliveries = await deleteDeliveryByCourierAndId(courierName, deliveryId);
+
+    await deleteScansByCourierAndDeliveryId(courierName, deliveryId);
+
+    return {
+        deletedDeliveryIds: deletedDeliveries.map((delivery) => delivery.id),
     };
 }

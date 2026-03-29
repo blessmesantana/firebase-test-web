@@ -12,7 +12,7 @@ export function parseRawData(text) {
         return { courierName: '', deliveryIds: [] };
     }
 
-    const courierNameMatch = lines[0].match(/^([А-Яа-яA-Za-z]+)/);
+    const courierNameMatch = lines[0].match(/^([\p{Script=Cyrillic}A-Za-z]+)/u);
     const courierName = courierNameMatch ? courierNameMatch[1] : '';
     const deliveryIds = lines
         .map((line) => line.match(/\b\d{10}\b/g))
@@ -24,6 +24,10 @@ export function parseRawData(text) {
 
 export function normalizeDeliveryId(rawValue) {
     return String(rawValue || '').replace(/\D/g, '');
+}
+
+export function normalizeCourierName(rawValue) {
+    return String(rawValue || '').trim().toLocaleLowerCase('ru-RU');
 }
 
 export function findMatchingDeliveries(rawTransferId, deliveries) {
@@ -72,16 +76,96 @@ export function findMatchingDeliveries(rawTransferId, deliveries) {
 
 export async function saveCourierAndDeliveries(service, courierName, deliveryIds) {
     if (!courierName || !deliveryIds || deliveryIds.length === 0) {
-        throw new Error('Нет данных для сохранения');
+        throw new Error('No data to save');
     }
 
-    const courier = await service.saveCourier(courierName);
+    const normalizedCourierName = normalizeCourierName(courierName);
+    const normalizedRequestedDeliveryIds = deliveryIds
+        .map((deliveryId) => normalizeDeliveryId(deliveryId))
+        .filter(Boolean);
+    const uniqueRequestedDeliveryIds = [...new Set(normalizedRequestedDeliveryIds)];
 
-    if (!courier.key) {
-        throw new Error('Не удалось получить ID курьера');
+    if (uniqueRequestedDeliveryIds.length === 0) {
+        throw new Error('No delivery ids to save');
     }
 
-    await service.saveDeliveries(courier.key, courierName, deliveryIds);
+    const [couriers, deliveries] = await Promise.all([
+        service.getCouriers(),
+        service.getDeliveries(),
+    ]);
 
-    return courier;
+    let courier =
+        couriers.find((item) => normalizeCourierName(item.name) === normalizedCourierName)
+        || null;
+    let createdCourier = false;
+
+    const ownersByDeliveryId = new Map();
+
+    deliveries.forEach((delivery) => {
+        const normalizedDeliveryId = normalizeDeliveryId(delivery.id);
+        const ownerName = String(delivery.courier_name || '').trim();
+        const normalizedOwnerName = normalizeCourierName(ownerName);
+
+        if (!normalizedDeliveryId || !ownerName || !normalizedOwnerName) {
+            return;
+        }
+
+        const owners = ownersByDeliveryId.get(normalizedDeliveryId) || [];
+
+        if (!owners.some((owner) => owner.normalizedName === normalizedOwnerName)) {
+            owners.push({
+                name: ownerName,
+                normalizedName: normalizedOwnerName,
+            });
+        }
+
+        ownersByDeliveryId.set(normalizedDeliveryId, owners);
+    });
+
+    const sameCourierDuplicateIds = [];
+    const crossCourierDuplicateIds = [];
+    const conflictingCourierNames = new Set();
+    const newDeliveryIds = [];
+
+    uniqueRequestedDeliveryIds.forEach((deliveryId) => {
+        const owners = ownersByDeliveryId.get(deliveryId) || [];
+
+        if (owners.length === 0) {
+            newDeliveryIds.push(deliveryId);
+            return;
+        }
+
+        if (owners.some((owner) => owner.normalizedName === normalizedCourierName)) {
+            sameCourierDuplicateIds.push(deliveryId);
+            return;
+        }
+
+        crossCourierDuplicateIds.push(deliveryId);
+        owners.forEach((owner) => {
+            conflictingCourierNames.add(owner.name);
+        });
+    });
+
+    if (!courier && newDeliveryIds.length > 0) {
+        courier = await service.saveCourier(courierName);
+        createdCourier = true;
+    }
+
+    if (newDeliveryIds.length > 0 && !courier?.key) {
+        throw new Error('Courier key is missing');
+    }
+
+    if (newDeliveryIds.length > 0) {
+        await service.saveDeliveries(courier.key, courierName, newDeliveryIds);
+    }
+
+    return {
+        courier,
+        createdCourier,
+        addedCount: newDeliveryIds.length,
+        conflictingCourierNames: [...conflictingCourierNames],
+        crossCourierDuplicateCount: crossCourierDuplicateIds.length,
+        duplicateCount: sameCourierDuplicateIds.length,
+        requestedCount: uniqueRequestedDeliveryIds.length,
+    };
 }

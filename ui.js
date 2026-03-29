@@ -145,13 +145,25 @@ export function createUiController({ dom }) {
         if (status === 'already_scanned') {
             text = courier || '';
             colorClass = 'already_scanned';
+        } else if (status === 'data_success') {
+            text = courier || message || '';
+            colorClass = 'data-success';
+        } else if (status === 'data_error') {
+            text = message;
+            colorClass = 'data-error';
         } else if (status === 'success') {
             text = courier || '';
             colorClass = 'success';
         } else if (status === 'not_found') {
-            text = message
-                ? `Передача с ID ${message} не найдена`
-                : 'Передача не найдена';
+            if (message) {
+                const normalizedMessage = String(message).trim();
+                text =
+                    normalizedMessage.length > 4
+                        ? `${normalizedMessage}\nне найдена в списке`
+                        : `${normalizedMessage} не найдена в списке`;
+            } else {
+                text = 'Передача не найдена';
+            }
             colorClass = 'error';
         } else if (status === 'error') {
             text = message;
@@ -222,49 +234,56 @@ export function createUiController({ dom }) {
         }, 0);
     }
 
-    function createFloatingMessage(text, backgroundColor, duration) {
-        const message = document.createElement('div');
-        message.textContent = text;
+    let floatingMessageElement = null;
+    let floatingMessageShowTimer = null;
+    let floatingMessageHideTimer = null;
+    let floatingMessageRemoveTimer = null;
 
-        applyStyles(message, {
-            position: 'fixed',
-            top: '24px',
-            left: '50%',
-            transform: 'translateX(-50%) translateY(-6px)',
-            color: 'var(--color-text-primary)',
-            fontFamily: 'Inter, sans-serif',
-            fontSize: '15px',
-            fontWeight: '500',
-            padding: '14px 32px',
-            borderRadius: '24px',
-            boxShadow: 'var(--shadow-soft)',
-            zIndex: '99999',
-            opacity: '0',
-            transition: 'opacity 220ms cubic-bezier(0.4, 0, 0.2, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms cubic-bezier(0.4, 0, 0.2, 1)',
-            background: backgroundColor,
-        });
+    function clearFloatingMessageTimers() {
+        window.clearTimeout(floatingMessageShowTimer);
+        window.clearTimeout(floatingMessageHideTimer);
+        window.clearTimeout(floatingMessageRemoveTimer);
+        floatingMessageShowTimer = null;
+        floatingMessageHideTimer = null;
+        floatingMessageRemoveTimer = null;
+    }
 
-        document.body.appendChild(message);
-        window.setTimeout(() => {
-            message.style.opacity = '1';
-            message.style.transform = 'translateX(-50%) translateY(0)';
-        }, 50);
-        window.setTimeout(() => {
-            message.style.opacity = '0';
-            message.style.transform = 'translateX(-50%) translateY(-6px)';
+    function createFloatingMessage(text, type, duration) {
+        if (!floatingMessageElement) {
+            floatingMessageElement = document.createElement('div');
+            floatingMessageElement.className = 'app-toast';
+            document.body.appendChild(floatingMessageElement);
+        }
+
+        clearFloatingMessageTimers();
+        floatingMessageElement.classList.remove('is-visible', 'app-toast--success', 'app-toast--error');
+        floatingMessageElement.textContent = text;
+        floatingMessageElement.classList.add(
+            type === 'error' ? 'app-toast--error' : 'app-toast--success',
+        );
+
+        floatingMessageShowTimer = window.setTimeout(() => {
+            floatingMessageElement?.classList.add('is-visible');
+        }, 16);
+
+        floatingMessageHideTimer = window.setTimeout(() => {
+            floatingMessageElement?.classList.remove('is-visible');
         }, Math.max(duration - 400, 400));
-        window.setTimeout(() => {
-            message.remove();
+
+        floatingMessageRemoveTimer = window.setTimeout(() => {
+            floatingMessageElement?.classList.remove(
+                'is-visible',
+                'app-toast--success',
+                'app-toast--error',
+            );
         }, duration);
     }
 
     function showToast(text, options = {}) {
-        const backgroundColor = options.type === 'error'
-            ? 'var(--color-danger)'
-            : 'var(--color-success)';
+        const type = options.type === 'error' ? 'error' : 'success';
         const duration = options.duration || 1600;
 
-        createFloatingMessage(text, backgroundColor, duration);
+        createFloatingMessage(text, type, duration);
     }
 
     function showCameraNotice(kind, text, options = {}) {
@@ -735,14 +754,36 @@ export function createUiController({ dom }) {
         const header = document.createElement('div');
         header.className = 'app-page-header';
 
+        let backButton = null;
+        if (typeof options.onBack === 'function') {
+            header.classList.add('has-back-button');
+
+            backButton = document.createElement('button');
+            backButton.type = 'button';
+            backButton.className = 'app-page-back-button';
+            backButton.setAttribute('aria-label', options.backLabel || 'Назад');
+            backButton.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 6L9 12L15 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            backButton.addEventListener('click', options.onBack);
+            header.appendChild(backButton);
+        }
+
         const title = document.createElement('div');
         title.className = 'app-page-title';
         title.textContent = options.title || '';
 
+        if (backButton) {
+            const headerSpacer = document.createElement('span');
+            headerSpacer.className = 'app-page-header-spacer';
+            headerSpacer.setAttribute('aria-hidden', 'true');
+            header.appendChild(title);
+            header.appendChild(headerSpacer);
+        } else {
+            header.appendChild(title);
+        }
+
         const body = document.createElement('div');
         body.className = `app-page-body ${options.bodyClassName || ''}`.trim();
 
-        header.appendChild(title);
         panel.appendChild(header);
         panel.appendChild(body);
         page.appendChild(panel);
@@ -755,6 +796,7 @@ export function createUiController({ dom }) {
             page,
             panel,
             header,
+            backButton,
             body,
             title,
             close: (closeOptions) => closeAppPage(page, closeOptions),
@@ -801,7 +843,31 @@ export function createUiController({ dom }) {
         modal.content.appendChild(confirmButton);
         modal.content.appendChild(cancelButton);
 
+        const unlockButtons = () => {
+            confirmButton.disabled = false;
+            cancelButton.disabled = false;
+            modal._confirmUnlockTimer = null;
+        };
+
+        confirmButton.disabled = true;
+        cancelButton.disabled = true;
+        modal._confirmUnlockTimer = window.setTimeout(unlockButtons, 220);
+
         cancelButton.addEventListener('click', modal.close);
+
+        const baseClose = modal.close;
+        modal.close = (...args) => {
+            if (modal._confirmUnlockTimer) {
+                window.clearTimeout(modal._confirmUnlockTimer);
+                modal._confirmUnlockTimer = null;
+            }
+
+            return baseClose(...args);
+        };
+
+        if (modal.backdrop) {
+            modal.backdrop._cleanupModal = modal.close;
+        }
 
         return {
             ...modal,

@@ -14,6 +14,9 @@ import {
 } from './logger.js';
 import { createScannerController } from './scanner.js';
 import { createUiController } from './ui.js';
+import { openAdminPanelPagePanel } from './admin-panel.js';
+import { openEncyclopediaPagePanel } from './encyclopedia.js';
+import { markNewBadgeSeen, shouldShowNewBadge } from './new-badges.js';
 import { openWhatsNewPagePanel } from './whats-new.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -154,7 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const THEME_STORAGE_KEY = 'appTheme';
     const BUTTON_PALETTE_STORAGE_KEY = 'appButtonPalette';
-    const APP_VERSION = 'v1.9.3.5';
+    const APP_VERSION = 'v1.9.5.1';
+    const ADMIN_PANEL_PASSWORD_HASH =
+        '35a092cbedd97769bf58b31dcb81324bceba0a55e0c7a61a6db37f8ec24e6784';
     const THEMES = ['light', 'blue', 'dark'];
     const THEME_BROWSER_COLORS = {
         light: '#e8e8e8',
@@ -690,9 +695,23 @@ document.addEventListener('DOMContentLoaded', () => {
         dom.manualSubmitButtonIos.addEventListener('click', handleIosManualSubmit);
     }
 
-    async function saveRawData(rawData) {
+    function showRawDataFeedback(message, options = {}) {
+        const feedback = options.feedback === 'toast' ? 'toast' : 'overlay';
+
+        if (feedback === 'toast') {
+            ui.showToast(message, {
+                duration: 2200,
+                type: 'error',
+            });
+            return;
+        }
+
+        ui.showScanResult('data_error', message, '', '', '');
+    }
+
+    async function saveRawData(rawData, options = {}) {
         if (!rawData) {
-            ui.showScanResult('error', 'Введите данные', '', '', '');
+            showRawDataFeedback('Введите данные', options);
             return false;
         }
 
@@ -709,34 +728,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     scope: 'data_entry',
                 },
             });
-            ui.showScanResult('error', 'Ошибка разбора данных', '', '', '');
+            showRawDataFeedback('Ошибка разбора данных', options);
             return false;
         }
 
         if (!courierName) {
-            ui.showScanResult('error', 'Не найдено имя курьера', '', '', '');
+            showRawDataFeedback('Не найдено имя курьера', options);
             return false;
         }
 
         if (deliveryIds.length === 0) {
-            ui.showScanResult('error', 'Не найдены номера передач', '', '', '');
+            showRawDataFeedback('Не найдены номера передач', options);
             return false;
         }
 
         try {
-            await saveCourierAndDeliveries(service, courierName, deliveryIds);
-            trackEvent('courier_saved', {
+            const saveResult = await saveCourierAndDeliveries(
+                service,
                 courierName,
-                deliveryCount: deliveryIds.length,
-            });
+                deliveryIds,
+            );
+            trackCourierSaveEvent(courierName, saveResult);
             ui.showScanResult(
-                'success',
+                'data_success',
                 '',
-                `Добавлен курьер: ${courierName}`,
+                buildCourierSaveMessage(courierName, saveResult),
                 '',
                 '',
             );
-            return true;
+            return {
+                courierName,
+                saveResult,
+            };
         } catch (error) {
             captureException(error, {
                 courierName,
@@ -747,15 +770,106 @@ document.addEventListener('DOMContentLoaded', () => {
                     scope: 'data_entry',
                 },
             });
-            ui.showScanResult(
-                'error',
-                'Ошибка при сохранении',
-                '',
-                '',
-                '',
-            );
+            showRawDataFeedback('Ошибка при сохранении', options);
             return false;
         }
+    }
+
+    function buildCourierSaveMessage(courierName, saveResult) {
+        if (!saveResult || typeof saveResult !== 'object') {
+            return `Добавлены передачи для ${courierName}`;
+        }
+
+        const conflictingCouriers = Array.isArray(saveResult.conflictingCourierNames)
+            ? saveResult.conflictingCourierNames.filter(Boolean)
+            : [];
+        const conflictingCourierLabel =
+            conflictingCouriers.length === 1
+                ? conflictingCouriers[0]
+                : conflictingCouriers.length > 1
+                  ? conflictingCouriers.join(', ')
+                  : '';
+
+        if (saveResult.addedCount === 0 && saveResult.crossCourierDuplicateCount > 0) {
+            if (conflictingCourierLabel) {
+                return `У ${conflictingCourierLabel} уже есть эти передачи`;
+            }
+
+            return 'У другого курьера уже есть эти передачи';
+        }
+
+        if (saveResult.addedCount === 0) {
+            return `Все передачи у ${courierName} уже сохранены`;
+        }
+
+        if (saveResult.crossCourierDuplicateCount > 0) {
+            if (conflictingCourierLabel) {
+                return `Добавлено ${saveResult.addedCount} для ${courierName}, часть уже у ${conflictingCourierLabel}`;
+            }
+
+            return `Добавлено ${saveResult.addedCount} для ${courierName}, часть уже у других курьеров`;
+        }
+
+        if (saveResult.duplicateCount === 0) {
+            return saveResult.createdCourier
+                ? `${courierName} добавлен, сохранено ${saveResult.addedCount}`
+                : `Добавлено передач для ${courierName}: ${saveResult.addedCount}`;
+        }
+
+        return `Добавлено ${saveResult.addedCount} для ${courierName}, пропущено ${saveResult.duplicateCount}`;
+    }
+
+    function buildDataEntryToastMessage(savePayload) {
+        const saveResult = savePayload?.saveResult;
+
+        if (!saveResult || typeof saveResult !== 'object') {
+            return 'Список загружен';
+        }
+
+        if (saveResult.addedCount === 0 && saveResult.crossCourierDuplicateCount > 0) {
+            return 'Передачи уже есть у другого курьера';
+        }
+
+        if (saveResult.addedCount === 0 && saveResult.duplicateCount > 0) {
+            return 'Дубли пропущены';
+        }
+
+        if (saveResult.crossCourierDuplicateCount > 0) {
+            return 'Часть передач уже есть у другого курьера';
+        }
+
+        if (saveResult.duplicateCount > 0) {
+            return 'Список загружен, дубли пропущены';
+        }
+
+        return 'Список загружен';
+    }
+
+    function trackCourierSaveEvent(courierName, saveResult, source = 'data') {
+        const meta = {
+            addedCount: saveResult?.addedCount ?? 0,
+            conflictingCourierNames: saveResult?.conflictingCourierNames ?? [],
+            courierName,
+            crossCourierDuplicateCount: saveResult?.crossCourierDuplicateCount ?? 0,
+            duplicateCount: saveResult?.duplicateCount ?? 0,
+            requestedCount: saveResult?.requestedCount ?? 0,
+            source,
+        };
+
+        if (
+            (saveResult?.addedCount ?? 0) === 0 &&
+            (saveResult?.crossCourierDuplicateCount ?? 0) > 0
+        ) {
+            trackEvent('courier_conflicts_skipped', meta, 'info');
+            return;
+        }
+
+        if ((saveResult?.addedCount ?? 0) === 0 && (saveResult?.duplicateCount ?? 0) > 0) {
+            trackEvent('courier_duplicates_skipped', meta, 'info');
+            return;
+        }
+
+        trackEvent('courier_saved', meta, 'info');
     }
 
     function openDataEntryModal() {
@@ -844,17 +958,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                await saveCourierAndDeliveries(service, courierName, deliveryIds);
-                dom.sidebarDataInput.value = '';
-                trackEvent('courier_saved', {
+                const saveResult = await saveCourierAndDeliveries(
+                    service,
                     courierName,
-                    deliveryCount: deliveryIds.length,
-                    source: 'sidebar',
-                });
+                    deliveryIds,
+                );
+
+                dom.sidebarDataInput.value = '';
+                trackCourierSaveEvent(courierName, saveResult, 'sidebar');
                 ui.showScanResult(
-                    'success',
+                    'data_success',
                     '',
-                    `Добавлен курьер: ${courierName}`,
+                    buildCourierSaveMessage(courierName, saveResult),
                     '',
                     '',
                 );
@@ -869,7 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                 });
                 ui.showScanResult(
-                    'error',
+                    'data_error',
                     'Ошибка при сохранении',
                     '',
                     '',
@@ -1156,16 +1271,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         submitButton.addEventListener('click', async () => {
             submitButton.disabled = true;
-            const isSaved = await saveRawData(textarea.value.trim());
+            const savePayload = await saveRawData(textarea.value.trim(), {
+                feedback: 'toast',
+            });
             submitButton.disabled = false;
 
-            if (isSaved) {
+            if (savePayload) {
                 if (dom.sidebarDataInput) {
                     dom.sidebarDataInput.value = '';
                 }
-                showScannerHomePage({
-                    direction: 'forward',
+                textarea.value = '';
+                ui.showToast(buildDataEntryToastMessage(savePayload), {
+                    duration: 1800,
                 });
+                textarea.focus();
                 return;
             }
 
@@ -1213,12 +1332,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const LOG_FIELD_LABELS = {
+        addedCount: 'Новых передач',
         appVersion: 'Версия',
         browser: 'Браузер',
         buttonPalette: 'Палитра',
         cameraCount: 'Камер доступно',
         cameraLabel: 'Камера',
         column: 'Колонка',
+        conflictingCourierNames: 'Найдены у курьеров',
+        crossCourierDuplicateCount: 'Найдено у других курьеров',
+        courierName: 'Курьер',
+        deliveryId: 'Передача',
         deviceType: 'Тип устройства',
         errorMessage: 'Текст ошибки',
         errorName: 'Ошибка',
@@ -1235,6 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         platform: 'Платформа',
         previousSelectedCameraId: 'Предыдущая камера',
         reason: 'Причина',
+        requestedCount: 'Передач в списке',
         restartIfActive: 'Перезапуск при активной камере',
         scannerActive: 'Сканер активен',
         scannerStarting: 'Сканер запускается',
@@ -1268,9 +1393,12 @@ document.addEventListener('DOMContentLoaded', () => {
         camera_changed: 'Камера изменена',
         camera_permission_denied: 'Доступ к камере запрещён',
         camera_start_failed: 'Ошибка запуска камеры',
+        courier_conflicts_skipped: 'Передачи найдены у другого курьера',
         courier_deleted: 'Курьер удалён',
-        courier_saved: 'Курьер сохранён',
+        courier_duplicates_skipped: 'Дубли пропущены',
+        courier_saved: 'Передачи сохранены',
         deliveries_deleted: 'Передачи удалены',
+        delivery_deleted: 'Передача удалена',
         delivery_not_found: 'Передача не найдена',
         exception: 'Исключение',
         log_message: 'Сообщение лога',
@@ -1287,6 +1415,113 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function translateLogType(type) {
         return LOG_TYPE_LABELS[type] || type || 'Событие';
+    }
+
+    function sha256Fallback(value) {
+        function rightRotate(amount, word) {
+            return (word >>> amount) | (word << (32 - amount));
+        }
+
+        const mathPow = Math.pow;
+        const maxWord = mathPow(2, 32);
+        const lengthProperty = 'length';
+        let result = '';
+        const words = [];
+        let ascii = unescape(encodeURIComponent(String(value || '')));
+        const asciiBitLength = ascii[lengthProperty] * 8;
+        const hash = (sha256Fallback._hash || []).slice(0);
+        const k = sha256Fallback._k || [];
+        let primeCounter = k[lengthProperty];
+        const isComposite = {};
+
+        for (let candidate = 2; primeCounter < 64; candidate += 1) {
+            if (!isComposite[candidate]) {
+                for (let composite = 0; composite < 313; composite += candidate) {
+                    isComposite[composite] = candidate;
+                }
+
+                hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+                k[primeCounter] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+                primeCounter += 1;
+            }
+        }
+
+        sha256Fallback._hash = hash.slice(0, 8);
+        sha256Fallback._k = k;
+
+        ascii += '\x80';
+
+        while ((ascii[lengthProperty] % 64) !== 56) {
+            ascii += '\x00';
+        }
+
+        for (let index = 0; index < ascii[lengthProperty]; index += 1) {
+            const charCode = ascii.charCodeAt(index);
+            words[index >> 2] |= charCode << (((3 - index) % 4) * 8);
+        }
+
+        words[words[lengthProperty]] = (asciiBitLength / maxWord) | 0;
+        words[words[lengthProperty]] = asciiBitLength;
+
+        for (let blockStart = 0; blockStart < words[lengthProperty]; ) {
+            const workingHash = hash.slice(0, 8);
+            const w = words.slice(blockStart, (blockStart += 16));
+
+            for (let index = 0; index < 64; index += 1) {
+                const word15 = w[index - 15];
+                const word2 = w[index - 2];
+                const a = workingHash[0];
+                const e = workingHash[4];
+                const temp1 =
+                    workingHash[7]
+                    + (rightRotate(6, e) ^ rightRotate(11, e) ^ rightRotate(25, e))
+                    + ((e & workingHash[5]) ^ ((~e) & workingHash[6]))
+                    + k[index]
+                    + (w[index] = index < 16
+                        ? w[index]
+                        : (
+                            w[index - 16]
+                            + (rightRotate(7, word15) ^ rightRotate(18, word15) ^ (word15 >>> 3))
+                            + w[index - 7]
+                            + (rightRotate(17, word2) ^ rightRotate(19, word2) ^ (word2 >>> 10))
+                        ) | 0);
+                const temp2 =
+                    (rightRotate(2, a) ^ rightRotate(13, a) ^ rightRotate(22, a))
+                    + ((a & workingHash[1]) ^ (a & workingHash[2]) ^ (workingHash[1] & workingHash[2]));
+
+                workingHash.pop();
+                workingHash.unshift((temp1 + temp2) | 0);
+                workingHash[4] = (workingHash[4] + temp1) | 0;
+            }
+
+            for (let index = 0; index < 8; index += 1) {
+                hash[index] = (hash[index] + workingHash[index]) | 0;
+            }
+        }
+
+        for (let index = 0; index < 8; index += 1) {
+            for (let shift = 3; shift >= 0; shift -= 1) {
+                const byte = (hash[index] >> (shift * 8)) & 255;
+                result += ((byte < 16) ? '0' : '') + byte.toString(16);
+            }
+        }
+
+        return result;
+    }
+
+    async function hashProtectedAccessValue(value) {
+        const normalizedValue = String(value || '').trim();
+
+        if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') {
+            return sha256Fallback(normalizedValue);
+        }
+
+        const bytes = new TextEncoder().encode(normalizedValue);
+        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+
+        return Array.from(new Uint8Array(digest))
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
     }
 
     function createLogMetaRows(meta = {}) {
@@ -1447,24 +1682,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 logsRenderRequestId += 1;
                 unsubscribeTelemetry?.();
             },
+            onBack: () => {
+                openSettingsPagePanel({
+                    direction: 'backward',
+                });
+            },
             pageId: 'logsPage',
             title: 'Логи',
         });
 
         const layout = document.createElement('div');
         layout.className = 'logs-page-layout';
-
-        const toolbar = document.createElement('div');
-        toolbar.className = 'logs-toolbar';
-
-        const backButton = ui.createSecondaryButton('Назад к настройкам', {
-            className: 'logs-back-button',
-        });
-        backButton.addEventListener('click', () => {
-            openSettingsPagePanel({
-                direction: 'backward',
-            });
-        });
 
         const list = document.createElement('div');
         list.className = 'logs-list';
@@ -1498,8 +1726,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         };
 
-        toolbar.appendChild(backButton);
-        layout.appendChild(toolbar);
         layout.appendChild(list);
         page.body.appendChild(layout);
         setLogsPlaceholder('Загрузка логов...');
@@ -1544,43 +1770,80 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    function openSettingsPagePanel(options = {}) {
+    function decorateSettingsButton(button, iconMarkup, label) {
+        button.classList.add('settings-panel-button');
+        button.textContent = '';
+
+        const icon = document.createElement('span');
+        icon.className = 'settings-panel-button-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = iconMarkup;
+
+        const text = document.createElement('span');
+        text.className = 'settings-panel-button-label';
+        text.textContent = label;
+
+        const spacer = document.createElement('span');
+        spacer.className = 'settings-panel-button-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+
+        button.appendChild(icon);
+        button.appendChild(text);
+        button.appendChild(spacer);
+    }
+
+    function appendSettingsNewBadge(button) {
+        const badge = document.createElement('div');
+        badge.className = 'settings-new-badge';
+        badge.innerHTML = `
+            <span class="settings-new-badge-icon" aria-hidden="true">
+                <svg width="14" height="10" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M11.8 1.8L13.7 6.9L18.8 8.8L13.7 10.7L11.8 15.8L9.9 10.7L4.8 8.8L9.9 6.9L11.8 1.8Z" fill="currentColor"/>
+                    <path d="M22.2 2.8L23.1 5.2L25.5 6.1L23.1 7L22.2 9.4L21.3 7L18.9 6.1L21.3 5.2L22.2 2.8Z" fill="currentColor" opacity="0.9"/>
+                    <path d="M5.2 11.3L6.2 13.9L8.8 14.9L6.2 15.9L5.2 18.5L4.2 15.9L1.6 14.9L4.2 13.9L5.2 11.3Z" fill="currentColor" opacity="0.82"/>
+                </svg>
+            </span>
+            <span class="settings-new-badge-text">New</span>
+        `;
+        button.classList.add('has-settings-badge');
+        button.appendChild(badge);
+    }
+
+    function shouldShowEncyclopediaNewBadge() {
+        return shouldShowNewBadge('encyclopedia_v1.9.5.0');
+    }
+
+    function handleEncyclopediaNewBadgeOpen(button) {
+        markNewBadgeSeen('encyclopedia_v1.9.5.0');
+
+        if (shouldShowEncyclopediaNewBadge()) {
+            return;
+        }
+
+        button.querySelector('.settings-new-badge')?.remove();
+        button.classList.remove('has-settings-badge');
+    }
+
+    function openThemeSettingsPagePanel(options = {}) {
         setActiveBottomNav('settings');
+
         const page = ui.showAppPage({
-            bodyClassName: 'settings-screen',
+            bodyClassName: 'settings-screen theme-settings-screen',
             direction: options.direction,
-            onClose: () => {
-                cameraSelectorRequestId += 1;
+            onBack: () => {
+                openSettingsPagePanel({
+                    direction: 'backward',
+                });
             },
-            pageId: 'settingsPage',
-            title: 'Настройки',
+            pageId: 'themeSettingsPage',
+            title: 'Настройки темы',
         });
-        let cameraSelectorRequestId = 0;
+
+        const layout = document.createElement('div');
+        layout.className = 'theme-settings-page-layout';
 
         const card = document.createElement('div');
         card.className = 'app-page-card';
-
-        function decorateSettingsButton(button, iconMarkup, label) {
-            button.classList.add('settings-panel-button');
-            button.textContent = '';
-
-            const icon = document.createElement('span');
-            icon.className = 'settings-panel-button-icon';
-            icon.setAttribute('aria-hidden', 'true');
-            icon.innerHTML = iconMarkup;
-
-            const text = document.createElement('span');
-            text.className = 'settings-panel-button-label';
-            text.textContent = label;
-
-            const spacer = document.createElement('span');
-            spacer.className = 'settings-panel-button-spacer';
-            spacer.setAttribute('aria-hidden', 'true');
-
-            button.appendChild(icon);
-            button.appendChild(text);
-            button.appendChild(spacer);
-        }
 
         const themeButton = ui.createPrimaryButton('Тема приложения', {
             className: 'data-entry-submit-button',
@@ -1652,6 +1915,7 @@ document.addEventListener('DOMContentLoaded', () => {
         themeRadioGroup.appendChild(lightThemeButton);
         themeRadioGroup.appendChild(blueThemeButton);
         themeRadioGroup.appendChild(darkThemeButton);
+        themeSelector.appendChild(themeRadioGroup);
 
         const paletteButton = ui.createPrimaryButton('Цвет кнопок', {
             className: 'data-entry-submit-button',
@@ -1678,31 +1942,10 @@ document.addEventListener('DOMContentLoaded', () => {
         buttonPaletteGrid.className = 'button-palette-grid';
 
         const paletteOptions = [
-            {
-                key: 'default',
-                label: 'По умолчанию',
-                previewClassName: 'is-default',
-            },
-            {
-                key: 'pink',
-                label: 'Розовый',
-                previewClassName: 'is-pink',
-            },
-            {
-                key: 'platinum',
-                label: 'Платина',
-                previewClassName: 'is-platinum',
-            },
-            {
-                key: 'gold',
-                label: 'Золото',
-                previewClassName: 'is-gold',
-            },
-            {
-                key: 'white',
-                label: 'Белый',
-                previewClassName: 'is-white',
-            },
+            { key: 'pink', label: 'Розовый' },
+            { key: 'platinum', label: 'Платина' },
+            { key: 'gold', label: 'Золото' },
+            { key: 'white', label: 'Белый' },
         ];
 
         const paletteButtons = new Map();
@@ -1710,27 +1953,38 @@ document.addEventListener('DOMContentLoaded', () => {
         function syncButtonPaletteSelector(paletteName) {
             const activePaletteName =
                 BUTTON_PALETTES.includes(paletteName) ? paletteName : 'default';
+            const activePaletteIndex = paletteOptions.findIndex(
+                (paletteOption) => paletteOption.key === activePaletteName,
+            );
 
             paletteButtons.forEach((button, key) => {
                 button.classList.toggle('is-active', key === activePaletteName);
             });
+            buttonPaletteGrid.style.setProperty(
+                '--button-palette-active-index',
+                String(Math.max(activePaletteIndex, 0)),
+            );
+            buttonPaletteGrid.setAttribute(
+                'data-button-palette-preview',
+                activePaletteIndex >= 0 ? activePaletteName : 'default',
+            );
+            buttonPaletteGrid.setAttribute(
+                'data-has-selection',
+                activePaletteIndex >= 0 ? 'true' : 'false',
+            );
         }
 
         paletteOptions.forEach((paletteOption) => {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'button-palette-option';
+            button.classList.add(`button-palette-option--${paletteOption.key}`);
             button.dataset.palette = paletteOption.key;
-
-            const swatch = document.createElement('span');
-            swatch.className = `button-palette-option-swatch ${paletteOption.previewClassName}`;
-            swatch.setAttribute('aria-hidden', 'true');
 
             const text = document.createElement('span');
             text.className = 'button-palette-option-label';
             text.textContent = paletteOption.label;
 
-            button.appendChild(swatch);
             button.appendChild(text);
             button.addEventListener('click', () => {
                 syncButtonPaletteSelector(applyButtonPalette(paletteOption.key));
@@ -1740,7 +1994,6 @@ document.addEventListener('DOMContentLoaded', () => {
             buttonPaletteGrid.appendChild(button);
         });
 
-        themeSelector.appendChild(themeRadioGroup);
         paletteSelector.appendChild(buttonPaletteGrid);
 
         function setThemeSelectorOpen(isOpen) {
@@ -1756,19 +2009,191 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         themeButton.addEventListener('click', () => {
-            setCameraSelectorOpen(false);
             setPaletteSelectorOpen(false);
             setThemeSelectorOpen(!themeSelector.classList.contains('is-open'));
         });
 
         paletteButton.addEventListener('click', () => {
-            setCameraSelectorOpen(false);
             setThemeSelectorOpen(false);
             setPaletteSelectorOpen(!paletteSelector.classList.contains('is-open'));
         });
 
+        const resetThemeButton = ui.createPrimaryButton('По умолчанию', {
+            className: 'data-entry-submit-button theme-reset-button',
+        });
+        resetThemeButton.addEventListener('click', () => {
+            syncThemeSelector(applyTheme('blue'));
+            syncButtonPaletteSelector(applyButtonPalette('default'));
+            ui.showToast('Настройки темы сброшены', {
+                duration: 1800,
+            });
+        });
+
         syncThemeSelector(document.body.dataset.theme || 'blue');
         syncButtonPaletteSelector(document.body.dataset.buttonPalette || 'default');
+
+        card.appendChild(themeButton);
+        card.appendChild(themeSelector);
+        card.appendChild(paletteButton);
+        card.appendChild(paletteSelector);
+        card.appendChild(resetThemeButton);
+        layout.appendChild(card);
+        page.body.appendChild(layout);
+    }
+
+    function openAdminPanelWithAccess(options = {}) {
+        const modal = ui.createModal({
+            className: 'data-entry-modal-content admin-access-modal',
+            maxButtonWidth: 420,
+        });
+
+        const title = document.createElement('div');
+        title.className = 'data-entry-modal-title';
+        title.textContent = 'Доступ к админ панели';
+
+        const description = document.createElement('div');
+        description.className = 'admin-access-description';
+        description.textContent = 'Введите пароль для открытия админ панели';
+
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.inputMode = 'numeric';
+        input.autocomplete = 'current-password';
+        input.className = 'admin-access-input';
+        input.placeholder = 'Пароль';
+
+        const submitButton = ui.createPrimaryButton('Открыть панель', {
+            className: 'admin-access-submit',
+        });
+        const cancelButton = ui.createSecondaryButton('Отмена', {
+            className: 'admin-access-cancel',
+        });
+
+        const submit = async () => {
+            submitButton.disabled = true;
+            const passwordHash = await hashProtectedAccessValue(input.value);
+
+            if (passwordHash !== ADMIN_PANEL_PASSWORD_HASH) {
+                submitButton.disabled = false;
+                input.value = '';
+                ui.showToast('Неверный пароль', {
+                    type: 'error',
+                    duration: 1800,
+                });
+                input.focus();
+                return;
+            }
+
+            modal.close();
+            openAdminPanelPagePanel(options);
+        };
+
+        submitButton.addEventListener('click', () => {
+            void submit();
+        });
+        cancelButton.addEventListener('click', modal.close);
+        input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            event.preventDefault();
+            void submit();
+        });
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(description);
+        modal.content.appendChild(input);
+        modal.content.appendChild(submitButton);
+        modal.content.appendChild(cancelButton);
+
+        window.setTimeout(() => {
+            input.focus();
+        }, 60);
+    }
+
+    function openSettingsToolsModal() {
+        const modal = ui.createModal({
+            className: 'data-entry-modal-content settings-tools-modal',
+            maxButtonWidth: 420,
+        });
+
+        const title = document.createElement('div');
+        title.className = 'data-entry-modal-title';
+        title.textContent = 'Служебное меню';
+
+        const description = document.createElement('div');
+        description.className = 'settings-tools-description';
+        description.textContent = 'Здесь собраны скрытые служебные разделы приложения.';
+
+        const logsButton = ui.createPrimaryButton('Логи', {
+            className: 'settings-tools-button',
+        });
+        const adminPanelButton = ui.createPrimaryButton('Админ панель', {
+            className: 'settings-tools-button',
+        });
+        const closeButton = ui.createSecondaryButton('Закрыть', {
+            className: 'settings-tools-close-button',
+        });
+
+        logsButton.addEventListener('click', () => {
+            modal.close();
+            openLogsPagePanel({
+                direction: 'forward',
+            });
+        });
+
+        adminPanelButton.addEventListener('click', () => {
+            modal.close();
+            openAdminPanelWithAccess({
+                direction: 'forward',
+                onBack: () => {
+                    openSettingsPagePanel({
+                        direction: 'backward',
+                    });
+                },
+                setActiveBottomNav,
+                ui,
+            });
+        });
+
+        closeButton.addEventListener('click', modal.close);
+
+        modal.content.appendChild(title);
+        modal.content.appendChild(description);
+        modal.content.appendChild(logsButton);
+        modal.content.appendChild(adminPanelButton);
+        modal.content.appendChild(closeButton);
+    }
+
+    function openSettingsPagePanel(options = {}) {
+        setActiveBottomNav('settings');
+        const page = ui.showAppPage({
+            bodyClassName: 'settings-screen',
+            direction: options.direction,
+            onClose: () => {
+                cameraSelectorRequestId += 1;
+            },
+            pageId: 'settingsPage',
+            title: 'Настройки',
+        });
+        let cameraSelectorRequestId = 0;
+
+        const card = document.createElement('div');
+        card.className = 'app-page-card';
+        const themeSettingsButton = ui.createPrimaryButton('Настройки темы', {
+            className: 'data-entry-submit-button',
+        });
+        decorateSettingsButton(
+            themeSettingsButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 8.75C10.2051 8.75 8.75 10.2051 8.75 12C8.75 13.7949 10.2051 15.25 12 15.25C13.7949 15.25 15.25 13.7949 15.25 12C15.25 10.2051 13.7949 8.75 12 8.75Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M19 12C19 11.5498 18.9639 11.108 18.8945 10.6777L20.5 9.42871L18.5713 6.08301L16.6328 6.75293C15.9586 6.22377 15.1927 5.80739 14.3682 5.53125L14.0625 3.5H9.9375L9.63184 5.53125C8.80734 5.80739 8.04143 6.22377 7.36719 6.75293L5.42871 6.08301L3.5 9.42871L5.10547 10.6777C5.03614 11.108 5 11.5498 5 12C5 12.4502 5.03614 12.892 5.10547 13.3223L3.5 14.5713L5.42871 17.917L7.36719 17.2471C8.04143 17.7762 8.80734 18.1926 9.63184 18.4688L9.9375 20.5H14.0625L14.3682 18.4688C15.1927 18.1926 15.9586 17.7762 16.6328 17.2471L18.5713 17.917L20.5 14.5713L18.8945 13.3223C18.9639 12.892 19 12.4502 19 12Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                </svg>
+            `,
+            'Настройки темы'
+        );
 
         const cameraButton = ui.createPrimaryButton('Выбор камеры', {
             className: 'data-entry-submit-button',
@@ -1887,9 +2312,6 @@ document.addEventListener('DOMContentLoaded', () => {
         cameraButton.addEventListener('click', async () => {
             const willOpen = !cameraSelector.classList.contains('is-open');
 
-            setThemeSelectorOpen(false);
-            setPaletteSelectorOpen(false);
-
             if (!willOpen) {
                 setCameraSelectorOpen(false);
                 return;
@@ -1904,21 +2326,12 @@ document.addEventListener('DOMContentLoaded', () => {
             setCameraSelectorOpen(hasCameras);
         });
 
-        const logsButton = ui.createPrimaryButton('Логи', {
-            className: 'data-entry-submit-button',
+        themeSettingsButton.addEventListener('click', () => {
+            setCameraSelectorOpen(false);
+            openThemeSettingsPagePanel({
+                direction: 'forward',
+            });
         });
-        decorateSettingsButton(
-            logsButton,
-            `
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M7 5.5H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                    <path d="M7 10.5H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                    <path d="M7 15.5H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                    <path d="M6 3.5H18C19.1046 3.5 20 4.39543 20 5.5V18.5C20 19.6046 19.1046 20.5 18 20.5H6C4.89543 20.5 4 19.6046 4 18.5V5.5C4 4.39543 4.89543 3.5 6 3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                </svg>
-            `,
-            'Логи'
-        );
 
         const whatsNewButton = ui.createPrimaryButton('Что нового?', {
             className: 'data-entry-submit-button',
@@ -1942,18 +2355,27 @@ document.addEventListener('DOMContentLoaded', () => {
             'Что нового?'
         );
 
-        logsButton.addEventListener('click', () => {
-            setThemeSelectorOpen(false);
-            setPaletteSelectorOpen(false);
-            setCameraSelectorOpen(false);
-            openLogsPagePanel({
-                direction: 'forward',
-            });
+        const encyclopediaButton = ui.createPrimaryButton('Справка', {
+            className: 'data-entry-submit-button',
         });
+        decorateSettingsButton(
+            encyclopediaButton,
+            `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 5.5C6 4.67157 6.67157 4 7.5 4H18V18.5H8.75C8.05842 18.5 7.5 19.0584 7.5 19.75C7.5 20.4416 8.05842 21 8.75 21H18" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                    <path d="M6 5.5V19.5C6 20.3284 5.32843 21 4.5 21H4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M9.5 8H14.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M9.5 11H15.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M9.5 14H13.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+            `,
+            'Справка'
+        );
+        if (shouldShowEncyclopediaNewBadge()) {
+            appendSettingsNewBadge(encyclopediaButton);
+        }
 
         whatsNewButton.addEventListener('click', () => {
-            setThemeSelectorOpen(false);
-            setPaletteSelectorOpen(false);
             setCameraSelectorOpen(false);
             openWhatsNewPagePanel({
                 direction: 'forward',
@@ -1967,19 +2389,54 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        card.appendChild(themeButton);
-        card.appendChild(themeSelector);
-        card.appendChild(paletteButton);
-        card.appendChild(paletteSelector);
+        encyclopediaButton.addEventListener('click', () => {
+            setCameraSelectorOpen(false);
+            handleEncyclopediaNewBadgeOpen(encyclopediaButton);
+            openEncyclopediaPagePanel({
+                direction: 'forward',
+                onBack: () => {
+                    openSettingsPagePanel({
+                        direction: 'backward',
+                    });
+                },
+                setActiveBottomNav,
+                ui,
+            });
+        });
+
+        card.appendChild(themeSettingsButton);
         card.appendChild(cameraButton);
         card.appendChild(cameraSelector);
-        card.appendChild(logsButton);
         card.appendChild(whatsNewButton);
+        card.appendChild(encyclopediaButton);
         page.body.appendChild(card);
 
         const versionNote = document.createElement('div');
         versionNote.className = 'settings-version-note';
         versionNote.textContent = APP_VERSION;
+        let versionTapCount = 0;
+        let versionTapTimer = null;
+        versionNote.addEventListener('click', () => {
+            versionTapCount += 1;
+
+            if (versionTapTimer) {
+                window.clearTimeout(versionTapTimer);
+            }
+
+            versionTapTimer = window.setTimeout(() => {
+                versionTapCount = 0;
+                versionTapTimer = null;
+            }, 900);
+
+            if (versionTapCount < 5) {
+                return;
+            }
+
+            versionTapCount = 0;
+            window.clearTimeout(versionTapTimer);
+            versionTapTimer = null;
+            openSettingsToolsModal();
+        });
         page.body.appendChild(versionNote);
     }
 
@@ -2139,6 +2596,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dom.bottomSettingsButton) {
         dom.bottomSettingsButton.addEventListener('click', () => {
             if (isBottomNavTargetActive('settings')) {
+                const settingsPage = document.getElementById('settingsPage');
+
+                if (settingsPage?.isConnected) {
+                    return;
+                }
+
+                openSettingsPagePanel({
+                    direction: 'backward',
+                });
                 return;
             }
 

@@ -1,14 +1,28 @@
 ﻿function uniqueSortedCourierNames(couriers) {
-    return [...new Set(couriers.map((courier) => courier.name).filter(Boolean))].sort(
-        (left, right) => left.localeCompare(right, 'ru'),
-    );
+    const uniqueNames = new Map();
+
+    couriers.forEach((courier) => {
+        const courierName = String(courier?.name || '').trim();
+        const normalizedCourierName = normalizeCourierName(courierName);
+
+        if (!courierName || !normalizedCourierName || uniqueNames.has(normalizedCourierName)) {
+            return;
+        }
+
+        uniqueNames.set(normalizedCourierName, courierName);
+    });
+
+    return [...uniqueNames.values()].sort((left, right) => left.localeCompare(right, 'ru'));
 }
 
 import {
     captureException,
     trackEvent,
 } from './logger.js';
-import { normalizeDeliveryId } from './deliveries.js';
+import {
+    normalizeCourierName,
+    normalizeDeliveryId,
+} from './deliveries.js';
 
 function appendEmptyState(target, text) {
     const empty = document.createElement('div');
@@ -33,16 +47,40 @@ async function loadCourierTransfers({ courierName, service }) {
         service.getDeliveries(),
         service.getScans(),
     ]);
+    const normalizedCourierName = normalizeCourierName(courierName);
 
-    const allDeliveries = deliveries
-        .filter((delivery) => delivery.courier_name === courierName)
-        .map((delivery) => String(delivery.id || ''))
-        .filter(Boolean);
+    const allDeliveries = [
+        ...new Set(
+            deliveries
+                .filter(
+                    (delivery) =>
+                        normalizeCourierName(delivery.courier_name) === normalizedCourierName,
+                )
+                .map((delivery) => String(delivery.id || ''))
+                .filter(Boolean),
+        ),
+    ];
     const scannedIds = new Set(
         scans
             .map((scan) => normalizeDeliveryId(scan.delivery_id))
             .filter(Boolean),
     );
+    const scanTimestamps = new Map();
+
+    scans.forEach((scan) => {
+        const normalizedDeliveryId = normalizeDeliveryId(scan.delivery_id);
+        const timestamp = Number(scan.timestamp) || 0;
+
+        if (!normalizedDeliveryId || timestamp <= 0) {
+            return;
+        }
+
+        const currentTimestamp = scanTimestamps.get(normalizedDeliveryId) || 0;
+
+        if (timestamp > currentTimestamp) {
+            scanTimestamps.set(normalizedDeliveryId, timestamp);
+        }
+    });
     const scannedDeliveries = new Set(
         allDeliveries.filter((deliveryId) => scannedIds.has(normalizeDeliveryId(deliveryId))),
     );
@@ -50,7 +88,29 @@ async function loadCourierTransfers({ courierName, service }) {
     return {
         allDeliveries,
         scannedDeliveries,
+        scanTimestamps,
     };
+}
+
+function formatCourierScanTimestamp(timestamp) {
+    if (!timestamp) {
+        return '';
+    }
+
+    try {
+        return new Date(timestamp)
+            .toLocaleString('ru-RU', {
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                month: '2-digit',
+                second: '2-digit',
+                year: '2-digit',
+            })
+            .replace(',', '');
+    } catch (error) {
+        return '';
+    }
 }
 
 async function loadCourierSummaries({ courierNames, service }) {
@@ -58,6 +118,7 @@ async function loadCourierSummaries({ courierNames, service }) {
         return {
             completedCourierNames: new Set(),
             deliveryCounts: new Map(),
+            scannedCounts: new Map(),
         };
     }
 
@@ -67,25 +128,36 @@ async function loadCourierSummaries({ courierNames, service }) {
     ]);
     const completedCourierNames = new Set();
     const deliveryCounts = new Map();
+    const scannedCounts = new Map();
+    const scannedIds = new Set(
+        scans
+            .map((scan) => normalizeDeliveryId(scan.delivery_id))
+            .filter(Boolean),
+    );
 
     courierNames.forEach((courierName) => {
-        const courierDeliveries = deliveries.filter(
-            (delivery) => delivery.courier_name === courierName,
-        );
+        const normalizedCourierName = normalizeCourierName(courierName);
+        const courierDeliveries = [
+            ...new Set(
+                deliveries
+                    .filter(
+                        (delivery) =>
+                            normalizeCourierName(delivery.courier_name) === normalizedCourierName,
+                    )
+                    .map((delivery) => normalizeDeliveryId(delivery.id))
+                    .filter(Boolean),
+            ),
+        ];
         deliveryCounts.set(courierName, courierDeliveries.length);
+        scannedCounts.set(
+            courierName,
+            courierDeliveries.filter((deliveryId) => scannedIds.has(deliveryId)).length,
+        );
 
         if (courierDeliveries.length === 0) {
             return;
         }
-
-        const scannedIds = new Set(
-            scans
-                .map((scan) => normalizeDeliveryId(scan.delivery_id))
-                .filter(Boolean),
-        );
-        const allScanned = courierDeliveries.every((delivery) => {
-            return scannedIds.has(normalizeDeliveryId(delivery.id));
-        });
+        const allScanned = courierDeliveries.every((deliveryId) => scannedIds.has(deliveryId));
 
         if (allScanned) {
             completedCourierNames.add(courierName);
@@ -95,6 +167,7 @@ async function loadCourierSummaries({ courierNames, service }) {
     return {
         completedCourierNames,
         deliveryCounts,
+        scannedCounts,
     };
 }
 
@@ -132,9 +205,10 @@ async function renderCourierStatsModal({ courierName, service, ui }) {
 
     let allDeliveries = [];
     let scannedDeliveries = new Set();
+    let scanTimestamps = new Map();
 
     try {
-        ({ allDeliveries, scannedDeliveries } = await loadCourierTransfers({
+        ({ allDeliveries, scannedDeliveries, scanTimestamps } = await loadCourierTransfers({
             courierName,
             service,
         }));
@@ -159,7 +233,13 @@ async function renderCourierStatsModal({ courierName, service, ui }) {
     }
 
     const notScanned = allDeliveries.filter((id) => !scannedDeliveries.has(id));
-    const scanned = allDeliveries.filter((id) => scannedDeliveries.has(id));
+    const scanned = allDeliveries
+        .filter((id) => scannedDeliveries.has(id))
+        .sort((left, right) => {
+            const leftTimestamp = scanTimestamps.get(normalizeDeliveryId(left)) || 0;
+            const rightTimestamp = scanTimestamps.get(normalizeDeliveryId(right)) || 0;
+            return rightTimestamp - leftTimestamp;
+        });
 
     const list = document.createElement('div');
     Object.assign(list.style, {
@@ -172,8 +252,16 @@ async function renderCourierStatsModal({ courierName, service, ui }) {
 
     [...notScanned, ...scanned].forEach((deliveryId) => {
         const item = document.createElement('div');
-        item.textContent = deliveryId;
+        const idLabel = document.createElement('span');
+        idLabel.className = 'courier-delivery-id';
+        idLabel.textContent = deliveryId;
+        item.appendChild(idLabel);
+
         Object.assign(item.style, {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
             fontSize: '13px',
             transition: 'opacity 0.3s',
             fontFamily: 'Inter, sans-serif',
@@ -181,7 +269,14 @@ async function renderCourierStatsModal({ courierName, service, ui }) {
         });
 
         if (scannedDeliveries.has(deliveryId)) {
-            item.classList.add('scanned');
+            item.classList.add('is-scanned');
+
+            const timestampLabel = document.createElement('span');
+            timestampLabel.className = 'courier-delivery-timestamp';
+            timestampLabel.textContent = formatCourierScanTimestamp(
+                scanTimestamps.get(normalizeDeliveryId(deliveryId)),
+            );
+            item.appendChild(timestampLabel);
         }
 
         list.appendChild(item);
@@ -229,6 +324,8 @@ async function toggleCourierAccordionItem({
     courierName,
     page,
     service,
+    ui,
+    onDeleteDelivery,
 }) {
     if (item.classList.contains('is-open')) {
         item.classList.remove('is-open');
@@ -242,6 +339,8 @@ async function toggleCourierAccordionItem({
         courierName,
         page,
         service,
+        ui,
+        onDeleteDelivery,
     });
 }
 
@@ -250,6 +349,8 @@ async function expandCourierAccordionItem({
     courierName,
     page,
     service,
+    ui,
+    onDeleteDelivery,
     forceReload = false,
 }) {
     item.classList.add('is-open');
@@ -274,9 +375,10 @@ async function expandCourierAccordionItem({
 
     let allDeliveries = [];
     let scannedDeliveries = new Set();
+    let scanTimestamps = new Map();
 
     try {
-        ({ allDeliveries, scannedDeliveries } = await loadCourierTransfers({
+        ({ allDeliveries, scannedDeliveries, scanTimestamps } = await loadCourierTransfers({
             courierName,
             service,
         }));
@@ -313,7 +415,13 @@ async function expandCourierAccordionItem({
     }
 
     const notScanned = allDeliveries.filter((id) => !scannedDeliveries.has(id));
-    const scanned = allDeliveries.filter((id) => scannedDeliveries.has(id));
+    const scanned = allDeliveries
+        .filter((id) => scannedDeliveries.has(id))
+        .sort((left, right) => {
+            const leftTimestamp = scanTimestamps.get(normalizeDeliveryId(left)) || 0;
+            const rightTimestamp = scanTimestamps.get(normalizeDeliveryId(right)) || 0;
+            return rightTimestamp - leftTimestamp;
+        });
 
     const deliveriesList = document.createElement('div');
     deliveriesList.className = 'courier-accordion-deliveries';
@@ -321,11 +429,45 @@ async function expandCourierAccordionItem({
     [...notScanned, ...scanned].forEach((deliveryId) => {
         const deliveryItem = document.createElement('div');
         deliveryItem.className = 'courier-accordion-delivery';
-        deliveryItem.textContent = deliveryId;
+
+        const idLabel = document.createElement('span');
+        idLabel.className = 'courier-accordion-delivery-id';
+        idLabel.textContent = deliveryId;
+        deliveryItem.appendChild(idLabel);
+
+        const deliveryActions = document.createElement('div');
+        deliveryActions.className = 'courier-accordion-delivery-actions';
 
         if (scannedDeliveries.has(deliveryId)) {
-            deliveryItem.classList.add('scanned');
+            deliveryItem.classList.add('is-scanned');
+
+            const timestampLabel = document.createElement('span');
+            timestampLabel.className = 'courier-accordion-delivery-timestamp';
+            timestampLabel.textContent = formatCourierScanTimestamp(
+                scanTimestamps.get(normalizeDeliveryId(deliveryId)),
+            );
+            deliveryActions.appendChild(timestampLabel);
         }
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'courier-accordion-delivery-delete-button';
+        deleteButton.setAttribute(
+            'aria-label',
+            `Удалить передачу ${deliveryId} у курьера ${courierName}`,
+        );
+        deleteButton.innerHTML = '<span class="courier-accordion-delivery-delete-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5A2 2 0 0 1 9 3H11A2 2 0 0 1 13 5V7" stroke="currentColor" stroke-width="1.5"/></svg></span>';
+        deleteButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDeleteDelivery?.({
+                courierName,
+                deliveryId,
+            });
+        });
+
+        deliveryActions.appendChild(deleteButton);
+        deliveryItem.appendChild(deliveryActions);
 
         deliveriesList.appendChild(deliveryItem);
     });
@@ -346,21 +488,24 @@ function createCourierAccordionItem({
     courierName,
     isComplete,
     isDeleteCandidate,
+    scannedDeliveriesCount,
     totalDeliveriesCount,
     onToggleDeleteCandidate,
     page,
     service,
+    ui,
+    onDeleteDelivery,
 }) {
     const item = document.createElement('div');
     item.className = 'courier-accordion';
     item.dataset.courierName = courierName;
 
     const header = document.createElement('div');
-    header.className = 'courier-accordion-header';
+    header.className = 'app-page-list-button courier-accordion-header';
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'app-page-list-button courier-accordion-toggle';
+    button.className = 'courier-accordion-toggle';
     button.setAttribute('aria-expanded', 'false');
 
     const label = document.createElement('span');
@@ -375,7 +520,22 @@ function createCourierAccordionItem({
 
     const status = document.createElement('span');
     status.className = 'courier-accordion-status';
-    status.textContent = String(totalDeliveriesCount ?? 0);
+
+    const statusCurrent = document.createElement('span');
+    statusCurrent.className = 'courier-accordion-status-current';
+    statusCurrent.textContent = String(scannedDeliveriesCount ?? 0);
+
+    const statusSeparator = document.createElement('span');
+    statusSeparator.className = 'courier-accordion-status-separator';
+    statusSeparator.textContent = '/';
+
+    const statusTotal = document.createElement('span');
+    statusTotal.className = 'courier-accordion-status-total';
+    statusTotal.textContent = String(totalDeliveriesCount ?? 0);
+
+    status.appendChild(statusCurrent);
+    status.appendChild(statusSeparator);
+    status.appendChild(statusTotal);
 
     const selectButton = document.createElement('button');
     selectButton.type = 'button';
@@ -392,7 +552,7 @@ function createCourierAccordionItem({
     const selectIndicator = document.createElement('span');
     selectIndicator.className = 'courier-accordion-select-indicator';
     selectIndicator.setAttribute('aria-hidden', 'true');
-    selectIndicator.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M8 10V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 10V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    selectIndicator.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5A2 2 0 0 1 9 3H11A2 2 0 0 1 13 5V7" stroke="currentColor" stroke-width="1.5"/></svg>';
     selectButton.appendChild(selectIndicator);
 
     const panel = document.createElement('div');
@@ -410,8 +570,8 @@ function createCourierAccordionItem({
     button.appendChild(completeIndicator);
     button.appendChild(label);
     button.appendChild(status);
-    header.appendChild(button);
     header.appendChild(selectButton);
+    header.prepend(button);
     item.appendChild(header);
     item.appendChild(panel);
 
@@ -427,6 +587,8 @@ function createCourierAccordionItem({
             courierName,
             page,
             service,
+            ui,
+            onDeleteDelivery,
         });
     });
 
@@ -514,6 +676,31 @@ export async function openCourierPage({ service, ui, direction }) {
         }
     }
 
+    function handleDeleteDelivery({ courierName, deliveryId }) {
+        const confirmDialog = ui.createConfirmDialog({
+            html: `Вы действительно хотите удалить передачу <b style="font-size:16px;">${deliveryId}</b> у курьера <b style="font-size:16px;">${courierName}</b>?`,
+            confirmText: 'Удалить передачу',
+        });
+
+        confirmDialog.confirmButton.addEventListener('click', async () => {
+            confirmDialog.confirmButton.disabled = true;
+            confirmDialog.cancelButton.disabled = true;
+            confirmDialog.confirmButton.textContent = 'Удаление...';
+
+            await service.deleteDeliveryAndRelatedScansByCourier(courierName, deliveryId);
+            trackEvent('delivery_deleted', {
+                courierName,
+                deliveryId,
+                scope: 'single',
+            }, 'warning');
+            await refreshCourierList();
+            confirmDialog.close();
+            ui.showToast('Передача удалена', {
+                duration: 1800,
+            });
+        });
+    }
+
     function toggleDeleteCandidate(courierName) {
         deleteCandidateCourier =
             deleteCandidateCourier === courierName ? '' : courierName;
@@ -558,11 +745,13 @@ export async function openCourierPage({ service, ui, direction }) {
         list.className = 'app-page-list archive-courier-list';
         let completedCourierNames = new Set();
         let deliveryCounts = new Map();
+        let scannedCounts = new Map();
 
         try {
             ({
                 completedCourierNames,
                 deliveryCounts,
+                scannedCounts,
             } = await loadCourierSummaries({
                 courierNames: couriers,
                 service,
@@ -581,17 +770,31 @@ export async function openCourierPage({ service, ui, direction }) {
             return;
         }
 
+        const sortedCouriers = [...couriers].sort((left, right) => {
+            const leftIsComplete = completedCourierNames.has(left);
+            const rightIsComplete = completedCourierNames.has(right);
+
+            if (leftIsComplete !== rightIsComplete) {
+                return leftIsComplete ? 1 : -1;
+            }
+
+            return left.localeCompare(right, 'ru');
+        });
+
         const reopenTasks = [];
 
-        couriers.forEach((courierName) => {
+        sortedCouriers.forEach((courierName) => {
             const accordionItem = createCourierAccordionItem({
                 courierName,
                 isComplete: completedCourierNames.has(courierName),
                 isDeleteCandidate: deleteCandidateCourier === courierName,
+                scannedDeliveriesCount: scannedCounts.get(courierName) || 0,
                 totalDeliveriesCount: deliveryCounts.get(courierName) || 0,
                 onToggleDeleteCandidate: toggleDeleteCandidate,
                 page,
                 service,
+                ui,
+                onDeleteDelivery: handleDeleteDelivery,
             });
 
             list.appendChild(accordionItem);
@@ -603,6 +806,8 @@ export async function openCourierPage({ service, ui, direction }) {
                         courierName,
                         page,
                         service,
+                        ui,
+                        onDeleteDelivery: handleDeleteDelivery,
                         forceReload: true,
                     }),
                 );
@@ -648,6 +853,7 @@ export async function openCourierPage({ service, ui, direction }) {
 
         confirmDialog.confirmButton.addEventListener('click', async () => {
             confirmDialog.confirmButton.disabled = true;
+            confirmDialog.cancelButton.disabled = true;
             confirmDialog.confirmButton.textContent = 'Удаление...';
 
             await service.deleteCourierCascade(selectedCourier);
@@ -656,11 +862,10 @@ export async function openCourierPage({ service, ui, direction }) {
                 scope: 'single',
             }, 'warning');
             await refreshCourierList();
-
-            confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(() => {
-                confirmDialog.close();
-            }, 1200);
+            confirmDialog.close();
+            ui.showToast('Курьер удален', {
+                duration: 1800,
+            });
         });
     });
 
@@ -678,6 +883,7 @@ export async function openCourierPage({ service, ui, direction }) {
 
         confirmDialog.confirmButton.addEventListener('click', async () => {
             confirmDialog.confirmButton.disabled = true;
+            confirmDialog.cancelButton.disabled = true;
             confirmDialog.confirmButton.textContent = 'Удаление...';
 
             await service.deleteDeliveriesAndRelatedScansByCourier(selectedCourier);
@@ -685,11 +891,10 @@ export async function openCourierPage({ service, ui, direction }) {
                 scope: 'courier',
             }, 'warning');
             await refreshCourierList();
-
-            confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(() => {
-                confirmDialog.close();
-            }, 1200);
+            confirmDialog.close();
+            ui.showToast('Передачи удалены', {
+                duration: 1800,
+            });
         });
     });
 
@@ -701,6 +906,7 @@ export async function openCourierPage({ service, ui, direction }) {
 
         confirmDialog.confirmButton.addEventListener('click', async () => {
             confirmDialog.confirmButton.disabled = true;
+            confirmDialog.cancelButton.disabled = true;
             confirmDialog.confirmButton.textContent = 'Удаление...';
 
             await service.deleteAllDailyData();
@@ -709,11 +915,10 @@ export async function openCourierPage({ service, ui, direction }) {
                 scope: 'all',
             }, 'warning');
             await refreshCourierList();
-
-            confirmDialog.confirmButton.textContent = 'Готово!';
-            window.setTimeout(() => {
-                confirmDialog.close();
-            }, 1200);
+            confirmDialog.close();
+            ui.showToast('Все данные удалены', {
+                duration: 1800,
+            });
         });
     });
 
