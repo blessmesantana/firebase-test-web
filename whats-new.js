@@ -1,12 +1,23 @@
 import { markNewBadgeSeen, shouldShowNewBadge } from './new-badges.js';
 
 const NEW_BADGE_VERSIONS = new Map([
+    ['v1.9.5.2', 'whats_new_v1.9.5.2'],
     ['v1.9.5.1', 'whats_new_v1.9.5.1'],
     ['v1.9.5.0', 'whats_new_v1.9.5.0'],
     ['v1.9.4.3', 'whats_new_v1.9.4.3'],
 ]);
 
 const WHATS_NEW_SECTIONS = [
+    {
+        version: 'v1.9.5.2',
+        items: [
+            {
+                title: 'Обновлены иконки',
+                text: 'Улучшена читаемость иконок приложения, некоторые из них были переработаны полностью.',
+            },
+            
+        ],
+    },
     {
         version: 'v1.9.5.1',
         items: [

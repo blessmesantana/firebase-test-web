@@ -456,7 +456,7 @@ async function expandCourierAccordionItem({
             'aria-label',
             `Удалить передачу ${deliveryId} у курьера ${courierName}`,
         );
-        deleteButton.innerHTML = '<span class="courier-accordion-delivery-delete-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5A2 2 0 0 1 9 3H11A2 2 0 0 1 13 5V7" stroke="currentColor" stroke-width="1.5"/></svg></span>';
+        deleteButton.innerHTML = '<span class="courier-accordion-delivery-delete-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5.2" y="6.8" width="9.6" height="9.2" rx="2.1" stroke="currentColor" stroke-width="1.5"/><path d="M3.8 6.8H16.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7.4 4.6C7.4 3.94 7.94 3.4 8.6 3.4H11.4C12.06 3.4 12.6 3.94 12.6 4.6V6.8H7.4V4.6Z" stroke="currentColor" stroke-width="1.5"/><path d="M8.4 9V13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11.6 9V13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>';
         deleteButton.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -552,7 +552,7 @@ function createCourierAccordionItem({
     const selectIndicator = document.createElement('span');
     selectIndicator.className = 'courier-accordion-select-indicator';
     selectIndicator.setAttribute('aria-hidden', 'true');
-    selectIndicator.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="7" width="10" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="3" width="4" height="2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5A2 2 0 0 1 9 3H11A2 2 0 0 1 13 5V7" stroke="currentColor" stroke-width="1.5"/></svg>';
+    selectIndicator.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5.2" y="6.8" width="9.6" height="9.2" rx="2.1" stroke="currentColor" stroke-width="1.5"/><path d="M3.8 6.8H16.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7.4 4.6C7.4 3.94 7.94 3.4 8.6 3.4H11.4C12.06 3.4 12.6 3.94 12.6 4.6V6.8H7.4V4.6Z" stroke="currentColor" stroke-width="1.5"/><path d="M8.4 9V13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11.6 9V13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
     selectButton.appendChild(selectIndicator);
 
     const panel = document.createElement('div');
@@ -1000,10 +1000,9 @@ function getShkSectionIconMarkup(sectionId) {
     if (sectionId === 'gates') {
         return `
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 16.5V5.5C3 4.39543 3.89543 3.5 5 3.5H7V16.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M17 16.5V5.5C17 4.39543 16.1046 3.5 15 3.5H13V16.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M7 3.5H13V16.5H7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M10 8.25V11.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M4.6 16V8.1C4.6 6.39 5.99 5 7.7 5H12.3C14.01 5 15.4 6.39 15.4 8.1V16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6.1 12.9H13.9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" transform="translate(0 1.5) translate(10 12.9) scale(1.21 1) translate(-10 -12.9)"/>
+                <path d="M8.9 10.8L11.1 10.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" transform="translate(0 1.55) translate(10 10.5) rotate(15) translate(-10 -10.5)"/>
             </svg>
         `;
     }
@@ -1015,7 +1014,7 @@ function getShkSectionIconMarkup(sectionId) {
                 <rect x="12" y="3" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
                 <rect x="3" y="12" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
                 <rect x="12" y="12" width="5" height="5" rx="1.4" stroke="currentColor" stroke-width="1.7"/>
-                <path d="M8 5.5H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M8 5.5H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" transform="translate(0 4.45)"/>
                 <path d="M10 8V12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
             </svg>
         `;
@@ -1024,12 +1023,10 @@ function getShkSectionIconMarkup(sectionId) {
     if (sectionId === 'crossdock') {
         return `
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 6.5L8 4V16L4 13.5V6.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                <path d="M12 4L16 6.5V13.5L12 16V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                <path d="M8.75 7.25H11.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M10.25 5.75L11.75 7.25L10.25 8.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M11.25 12.75H8.75" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M9.75 11.25L8.25 12.75L9.75 14.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3.75 7L6.75 5.25L9.75 7V12.75L6.75 14.5L3.75 12.75V7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" transform="translate(-1.75 0) translate(6.75 9.88) scale(0.8 0.8) translate(-6.75 -9.88)"/>
+                <path d="M10.25 7L13.25 5.25L16.25 7V12.75L13.25 14.5L10.25 12.75V7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" transform="translate(1.75 0) translate(13.25 9.88) scale(0.8 0.8) translate(-13.25 -9.88)"/>
+                <path d="M8.75 10H11.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" transform="translate(10 10) scale(0.7 0.7) translate(-10 -10)"/>
+                <path d="M10.15 8.8L11.35 10L10.15 11.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" transform="translate(10.75 10) scale(0.7 0.7) translate(-10.75 -10)"/>
             </svg>
         `;
     }
@@ -1040,7 +1037,6 @@ function getShkSectionIconMarkup(sectionId) {
                 <path d="M4 6.25L10 3L16 6.25V13.75L10 17L4 13.75V6.25Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
                 <path d="M10 3V17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
                 <path d="M4 6.25L10 9.5L16 6.25" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                <path d="M6 15.5H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.75"/>
             </svg>
         `;
     }
